@@ -1,0 +1,27 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+htmlcov/
+
+# Isolated environments and local experiment state
+.conda/
+.venv/
+runs/
+checkpoints/
+exports/
+wandb/
+
+# Frontend build state
+node_modules/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+

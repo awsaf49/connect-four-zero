@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "connect4-zero"
+version = "0.1.0"
+description = "A local AlphaGo Zero laboratory for Connect Four"
+requires-python = ">=3.12,<3.13"
+
+[project.scripts]
+connect4-zero = "connect4_zero.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+

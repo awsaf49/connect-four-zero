@@ -1,0 +1,29 @@
+# Connect Four Zero
+
+A local, inspectable AlphaGo Zero system for standard 7x6 Connect Four. It trains from random weights with self-play, PUCT search, and a single residual policy/value network accelerated by Apple Metal.
+
+## Setup
+
+```bash
+conda env create -f environment.yml
+npm --prefix web install
+conda activate connect4-zero
+wandb login
+```
+
+## Run
+
+```bash
+make api
+make web
+```
+
+Open `http://localhost:5173`. The API runs at `http://localhost:8000`.
+
+Training refuses to run without PyTorch MPS unless `--allow-cpu` is passed explicitly. Generated runs, checkpoints, databases, W&B state, and exports are local and ignored by Git.
+
+```bash
+make test
+make train-60
+```
+
