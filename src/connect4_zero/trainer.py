@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import math
 import threading
 import time
 import uuid
@@ -137,6 +136,15 @@ class TrainingController:
         self._restore_if_available()
 
     def _restore_if_available(self) -> None:
+        trainer_state = self.store.root / "trainer_state.pt"
+        if trainer_state.exists():
+            payload = torch.load(trainer_state, map_location="cpu", weights_only=True)
+            self.training_model.load_state_dict(payload["training_model"])
+            self.champion_model.load_state_dict(payload["champion_model"])
+            self.optimizer.load_state_dict(payload["optimizer"])
+            self.step = int(payload["step"])
+            self.generation = int(payload["generation"])
+            return
         checkpoints = [item for item in self.store.list_checkpoints() if Path(item.path).exists()]
         if not checkpoints:
             return
@@ -267,7 +275,7 @@ class TrainingController:
     def _train_candidate(self) -> dict[str, float]:
         self.training_model.train()
         totals = np.zeros(3, dtype=np.float64)
-        steps = min(self.config.training_steps, max(1, math.ceil(len(self.replay) / self.config.batch_size) * 4))
+        steps = self.config.training_steps
         started = time.perf_counter()
         for _ in range(steps):
             if self._budget_exhausted():
@@ -439,7 +447,24 @@ class TrainingController:
             metadata=metadata,
         )
         self.store.add_checkpoint(record)
+        self._save_trainer_state()
         return record
+
+    def _save_trainer_state(self) -> None:
+        path = self.store.root / "trainer_state.pt"
+        temporary = path.with_suffix(".tmp.pt")
+        torch.save(
+            {
+                "version": 1,
+                "training_model": self.training_model.state_dict(),
+                "champion_model": self.champion_model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "step": self.step,
+                "generation": self.generation,
+            },
+            temporary,
+        )
+        temporary.replace(path)
 
     @staticmethod
     def _move_trace(before: ConnectFour, after: ConnectFour, action: int, result: SearchResult) -> MoveTrace:

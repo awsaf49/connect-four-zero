@@ -11,6 +11,8 @@ import torch
 import uvicorn
 
 from .network import PolicyValueNet
+from .network import PolicyValueEvaluator
+from .evaluation import play_vs_random
 from .schemas import RunConfig, RunRecord, RunStatus
 from .store import RunStore
 from .trainer import TrainingController
@@ -32,6 +34,10 @@ def _parser() -> argparse.ArgumentParser:
     train.add_argument("--allow-cpu", action="store_true")
 
     commands.add_parser("system", help="show accelerator readiness")
+    evaluate = commands.add_parser("evaluate", help="benchmark a checkpoint against random play")
+    evaluate.add_argument("checkpoint", type=Path)
+    evaluate.add_argument("--games", type=int, default=200)
+    evaluate.add_argument("--simulations", type=int, default=64)
     return parser
 
 
@@ -53,6 +59,11 @@ def main() -> None:
                 indent=2,
             )
         )
+        return
+    if args.command == "evaluate":
+        evaluator, metadata = PolicyValueEvaluator.load(args.checkpoint)
+        result = play_vs_random(evaluator, games=args.games, simulations=args.simulations)
+        print(json.dumps({"checkpoint": str(args.checkpoint), "metadata": metadata, **result.as_dict()}, indent=2))
         return
 
     run_id = f"run-{uuid.uuid4().hex[:12]}"
@@ -83,4 +94,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

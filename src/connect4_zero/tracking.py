@@ -25,7 +25,7 @@ class WandbTracker:
                 mode=mode,
                 config=config,
                 dir=str(directory),
-                settings=wandb.Settings(start_method="thread"),
+                settings=wandb.Settings(),
             )
         except Exception as exc:  # W&B must never interrupt training.
             self.error = str(exc)
@@ -56,4 +56,3 @@ class WandbTracker:
                 self.run.finish(exit_code=exit_code)
             except Exception as exc:
                 self.error = str(exc)
-

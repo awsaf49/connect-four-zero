@@ -24,3 +24,11 @@ def test_human_game_rejects_illegal_move() -> None:
     response = client.post(f"/api/games/{game_id}/moves", json={"action": 9})
     assert response.status_code == 422
 
+
+def test_human_game_analysis_contains_bounded_solver() -> None:
+    client = TestClient(app)
+    game = client.post("/api/games", json={"difficulty": "beginner", "human_player": 1, "simulations": 2}).json()
+    analysis = client.get(f"/api/games/{game['id']}/analysis")
+    assert analysis.status_code == 200
+    assert "solver" in analysis.json()
+    assert len(analysis.json()["solver"]["grades"]) == 7

@@ -14,12 +14,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .network import PolicyValueNet
+from .demo import install_bundled_demo
+from .export import export_replay
 from .schemas import RunConfig, SystemStatus
 from .service import ArenaService, EventBroker, TrainingManager
 from .store import RunRepository
 
 RUNS_ROOT = Path(os.getenv("CONNECT4_RUNS_DIR", "runs"))
 repository = RunRepository(RUNS_ROOT)
+install_bundled_demo(repository)
 broker = EventBroker()
 training = TrainingManager(repository, broker)
 arena = ArenaService(repository)
@@ -125,6 +128,29 @@ def get_replay(run_id: str, game_id: str) -> dict[str, Any]:
     return game.model_dump(mode="json")
 
 
+@app.post("/api/runs/{run_id}/games/{game_id}/export")
+def export_run_replay(run_id: str, game_id: str) -> dict[str, Any]:
+    store = repository.open(run_id)
+    game = store.get_game(game_id)
+    if game is None:
+        raise HTTPException(404, "Replay not found")
+    output = store.export_dir / f"{game_id}.mp4"
+    manifest = export_replay([move.action for move in game.moves], output)
+    return {
+        **manifest.to_dict(),
+        "mp4_url": f"/api/runs/{run_id}/exports/{output.name}",
+        "json_url": f"/api/runs/{run_id}/exports/{manifest.json_path.name}",
+    }
+
+
+@app.get("/api/runs/{run_id}/exports/{filename}")
+def download_run_export(run_id: str, filename: str) -> FileResponse:
+    path = repository.open(run_id).export_dir / Path(filename).name
+    if not path.is_file():
+        raise HTTPException(404, "Export not found")
+    return FileResponse(path)
+
+
 @app.post("/api/games", status_code=201)
 def create_game(request: CreateGameRequest) -> dict[str, Any]:
     try:
@@ -149,6 +175,21 @@ def game_analysis(game_id: str) -> dict[str, Any]:
         return arena.analyze(game_id)
     except KeyError:
         raise HTTPException(404, "Game not found") from None
+
+
+@app.post("/api/games/{game_id}/export")
+def export_human_replay(game_id: str) -> dict[str, Any]:
+    game = arena.games.get(game_id)
+    if game is None:
+        raise HTTPException(404, "Game not found")
+    store = repository.open("human-games")
+    output = store.export_dir / f"{game_id}.mp4"
+    manifest = export_replay([move.action for move in game.moves], output)
+    return {
+        **manifest.to_dict(),
+        "mp4_url": f"/api/runs/human-games/exports/{output.name}",
+        "json_url": f"/api/runs/human-games/exports/{manifest.json_path.name}",
+    }
 
 
 @app.websocket("/ws/runs/{run_id}")

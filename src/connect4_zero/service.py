@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from .auditor import NegamaxSolver, Position
 from .game import ConnectFour
 from .mcts import MCTS, Node, SearchResult
 from .network import PolicyValueEvaluator, PolicyValueNet
@@ -134,6 +135,7 @@ class ArenaService:
         self.games: dict[str, HumanGame] = {}
         self._evaluators: dict[str, PolicyValueEvaluator] = {}
         self._lock = threading.RLock()
+        self.auditor = NegamaxSolver(max_nodes=250_000, max_seconds=0.35)
 
     def available_checkpoints(self) -> list[CheckpointRecord]:
         records: list[CheckpointRecord] = []
@@ -204,8 +206,11 @@ class ArenaService:
             raise ValueError("it is not the human player's turn")
         analysis, _ = game.search.search(game.state, record_snapshots=True)
         before = game.state
+        audit = self.auditor.grade_moves(Position.from_game(before))
         game.state = before.play(action)
         human_trace = self._trace(before, game.state, action, analysis)
+        grade = audit.grades.get(action)
+        human_trace.solver_grade = self._grade_label(grade.outcome.value, grade.exact) if grade else None
         game.moves.append(human_trace)
         game.root = None
         ai_trace = None if game.state.is_terminal else self._ai_move(game)
@@ -218,14 +223,18 @@ class ArenaService:
         if game.state.is_terminal:
             return {"terminal": True, "winner": game.state.winner}
         result, _ = game.search.search(game.state, record_snapshots=True)
-        return self._search_payload(result)
+        audit = self.auditor.grade_moves(Position.from_game(game.state))
+        return {**self._search_payload(result), "solver": self._audit_payload(audit)}
 
     def _ai_move(self, game: HumanGame) -> MoveTrace:
         before = game.state
+        audit = self.auditor.grade_moves(Position.from_game(before))
         result, root = game.search.search(before, root=game.root, record_snapshots=True)
         action = game.search.select_action(result, 0.0)
         game.state = before.play(action)
         trace = self._trace(before, game.state, action, result)
+        grade = audit.grades.get(action)
+        trace.solver_grade = self._grade_label(grade.outcome.value, grade.exact) if grade else None
         game.moves.append(trace)
         game.root = MCTS.advance_root(root, action)
         return trace
@@ -282,4 +291,26 @@ class ArenaService:
                 }
                 for item in result.snapshots
             ],
+        }
+
+    @staticmethod
+    def _grade_label(outcome: str, exact: bool) -> str:
+        return f"{outcome}:{'exact' if exact else 'bounded'}"
+
+    @staticmethod
+    def _audit_payload(audit: Any) -> dict[str, Any]:
+        return {
+            "complete": audit.complete,
+            "outcome": audit.outcome.value,
+            "best_moves": list(audit.best_moves),
+            "nodes": audit.nodes,
+            "aborted_reason": audit.aborted_reason,
+            "grades": {
+                str(action): {
+                    "outcome": grade.outcome.value,
+                    "value": grade.value,
+                    "exact": grade.exact,
+                }
+                for action, grade in audit.grades.items()
+            },
         }
