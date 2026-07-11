@@ -239,14 +239,17 @@ export const apiClient = {
   async getEvolution(runId: string): Promise<ApiResult<EvolutionPoint[]>> {
     const metrics = await request<BackendMetric[]>(`/api/runs/${runId}/metrics`);
     if (!metrics?.length) return { data: DEMO_EVOLUTION, source: "demo" };
-    const points = metrics.map((metric, index) => ({
-      generation: index,
+    const samples = metrics.map((metric, index) => ({
+      generation: valueNumber(metric.values, "run/generation", index),
       policyLoss: valueNumber(metric.values, "loss/policy"),
       valueLoss: valueNumber(metric.values, "loss/value"),
       arenaWinRate: valueNumber(metric.values, "evaluation/score"),
       elo: 1000 + valueNumber(metric.values, "run/generation") * 80 + index * 8,
       games: valueNumber(metric.values, "run/replay_positions"),
     }));
+    const points = Array.from(
+      samples.reduce((latest, sample) => latest.set(sample.generation, sample), new Map<number, EvolutionPoint>()).values(),
+    );
     return { data: points, source: "api" };
   },
 
