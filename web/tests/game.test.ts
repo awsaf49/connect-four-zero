@@ -29,6 +29,8 @@ describe("Connect Four demo engine", () => {
 
     expect(hasWinner(horizontal, 1)).toBe(true);
     expect(hasWinner(vertical, 2)).toBe(true);
+    expect(winningCells(horizontal, 1)).toEqual([[5, 0], [5, 1], [5, 2], [5, 3]]);
+    expect(winningCells(vertical, 2)).toEqual([[2, 1], [3, 1], [4, 1], [5, 1]]);
     expect(winningCells(diagonal, 1)).toHaveLength(4);
   });
 

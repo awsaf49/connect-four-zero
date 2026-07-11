@@ -746,12 +746,14 @@ button:disabled {
 }
 
 .board-grid {
+  --board-padding: clamp(9px, 1.5vw, 15px);
+  position: relative;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(6, minmax(0, 1fr));
   gap: clamp(5px, 1vw, 9px);
   aspect-ratio: 7 / 6;
-  padding: clamp(9px, 1.5vw, 15px);
+  padding: var(--board-padding);
   border: 1px solid #255a9d;
   border-radius: 13px;
   background: var(--blue-deep);
@@ -821,8 +823,40 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.78), inset 0 2px 3px rgba(255, 255, 255, 0.34), 0 2px 6px rgba(9, 25, 57, 0.32);
 }
 
-.board-cell.is-winning .piece {
-  animation: winner-pulse 850ms ease-in-out infinite alternate;
+.board-cell.is-winning {
+  z-index: 2;
+}
+
+.board-cell.is-winning .piece:not(.piece-dropping) {
+  z-index: 3;
+  animation: winner-pop 650ms cubic-bezier(0.22, 0.8, 0.3, 1.25) var(--win-delay, 0ms) both;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.94), 0 5px 13px rgba(4, 24, 54, 0.42), inset 0 2px 3px rgba(255, 255, 255, 0.42);
+}
+
+.winning-line {
+  position: absolute;
+  z-index: 4;
+  inset: var(--board-padding);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.winning-line line {
+  fill: none;
+  opacity: 0;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  animation: winner-line-appear 240ms ease-out 430ms forwards;
+}
+
+.winning-line-halo {
+  stroke: rgba(8, 30, 61, 0.52);
+  stroke-width: 10;
+}
+
+.winning-line-core {
+  stroke: rgba(255, 255, 255, 0.96);
+  stroke-width: 4;
 }
 
 .last-move-marker {
@@ -2104,9 +2138,16 @@ td strong {
   50% { opacity: 1; }
 }
 
-@keyframes winner-pulse {
-  from { transform: scale(0.98); }
-  to { transform: scale(1.05); }
+@keyframes winner-pop {
+  0% { transform: translateY(0) scale(1); }
+  52% { transform: translateY(-9%) scale(1.16); }
+  76% { transform: translateY(-3%) scale(1.06); }
+  100% { transform: translateY(-5%) scale(1.1); }
+}
+
+@keyframes winner-line-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (max-width: 1180px) {
@@ -2523,5 +2564,6 @@ td strong {
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
   }
 }

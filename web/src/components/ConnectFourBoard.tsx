@@ -49,6 +49,8 @@ export function ConnectFourBoard({
   const previousMoveKey = useRef(moveKey);
   const [droppingMoveKey, setDroppingMoveKey] = useState<string | null>(null);
   const winningSet = new Set(winningCells.map(([row, column]) => `${row}-${column}`));
+  const winningStart = winningCells[0];
+  const winningEnd = winningCells.at(-1);
   const currentCanPlay = !disabled && Boolean(onColumnSelect);
 
   useEffect(() => {
@@ -99,6 +101,7 @@ export function ConnectFourBoard({
             const isLastMove = lastMove?.row === rowIndex && lastMove.column === columnIndex;
             const isDropping = isLastMove && moveKey === droppingMoveKey;
             const isWinningCell = winningSet.has(`${rowIndex}-${columnIndex}`);
+            const winningIndex = winningCells.findIndex(([row, column]) => row === rowIndex && column === columnIndex);
             return (
               <div
                 className={`board-cell cell-${cell} ${isLastMove ? "is-last-move" : ""} ${isWinningCell ? "is-winning" : ""}`}
@@ -108,10 +111,13 @@ export function ConnectFourBoard({
               >
                 <span
                   className={`piece piece-${cell} ${isDropping && cell ? "piece-dropping" : ""}`}
-                  style={isDropping && cell ? {
-                    "--drop-rows": rowIndex + 1,
-                    "--drop-duration": `${discDropDuration(rowIndex)}ms`,
-                  } as CSSProperties : undefined}
+                  style={{
+                    ...(isDropping && cell ? {
+                      "--drop-rows": rowIndex + 1,
+                      "--drop-duration": `${discDropDuration(rowIndex)}ms`,
+                    } : {}),
+                    ...(isWinningCell ? { "--win-delay": `${winningIndex * 70}ms` } : {}),
+                  } as CSSProperties}
                   aria-hidden="true"
                 />
                 {isLastMove ? <span className="last-move-marker" aria-hidden="true" /> : null}
@@ -119,6 +125,12 @@ export function ConnectFourBoard({
             );
           }),
         )}
+        {winningStart && winningEnd ? (
+          <svg className="winning-line" viewBox="0 0 7 6" preserveAspectRatio="none" aria-hidden="true">
+            <line className="winning-line-halo" x1={winningStart[1] + 0.5} y1={winningStart[0] + 0.5} x2={winningEnd[1] + 0.5} y2={winningEnd[0] + 0.5} pathLength="1" />
+            <line className="winning-line-core" x1={winningStart[1] + 0.5} y1={winningStart[0] + 0.5} x2={winningEnd[1] + 0.5} y2={winningEnd[0] + 0.5} pathLength="1" />
+          </svg>
+        ) : null}
       </div>
       <div className="board-underbar">
         <span className="board-player-key"><span className="key-dot key-human" /> You</span>
