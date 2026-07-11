@@ -332,6 +332,7 @@ function App() {
   const [thinking, setThinking] = useState(false);
   const [remoteGameId, setRemoteGameId] = useState<string | null>(null);
   const [modelLabel, setModelLabel] = useState("demo-champion");
+  const [showGameResult, setShowGameResult] = useState(false);
   const [trainingMinutes, setTrainingMinutes] = useState<number | null>(60);
   const [launchingRun, setLaunchingRun] = useState(false);
 
@@ -455,12 +456,24 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [replayCursor, replayPlaying, selectedReplay]);
 
+  useEffect(() => {
+    if (!playState.winner) {
+      setShowGameResult(false);
+      return;
+    }
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const delayMs = reduceMotion ? 80 : discDropDuration(playState.lastMove?.row ?? 0) + 420;
+    const timer = window.setTimeout(() => setShowGameResult(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [playState.lastMove?.row, playState.winner]);
+
   function navigate(nextView: ViewId) {
     setView(nextView);
   }
 
   async function startRemoteGame(nextDifficulty: DifficultyId) {
     setThinking(true);
+    setShowGameResult(false);
     const game = await apiClient.createGame(nextDifficulty);
     if (!game) {
       setSource("demo");
@@ -523,6 +536,7 @@ function App() {
     setPlayState(next);
     setPlayAnalysis(createAnalysis(next.board, 1, difficulty, DIFFICULTIES[difficulty].simulations));
     setThinking(false);
+    setShowGameResult(false);
     playUiSound("select", muted);
     if (source === "api") void startRemoteGame(difficulty);
   }
@@ -813,6 +827,20 @@ function App() {
         <div className="content-wrap">{renderView()}</div>
       </main>
       <nav className="mobile-nav" aria-label="Mobile navigation">{NAV_ITEMS.map(({ id, label, icon: Icon }) => <button className={view === id ? "is-active" : ""} key={id} onClick={() => navigate(id)} type="button"><Icon size={18} /><span>{label}</span></button>)}</nav>
+      {showGameResult && playState.winner ? (
+        <div className="game-result-backdrop" role="presentation">
+          <section className={`game-result-dialog result-player-${playState.winner}`} role="dialog" aria-modal="true" aria-labelledby="game-result-title" aria-describedby="game-result-copy">
+            <div className="game-result-symbol"><Trophy size={25} strokeWidth={1.9} /></div>
+            <p className="eyebrow">Game complete</p>
+            <h2 id="game-result-title">{playState.winner === 1 ? "You connected four" : "Zero connected four"}</h2>
+            <p id="game-result-copy">{playState.winner === 1 ? "You beat the current checkpoint." : "The engine won this game."} Final position after {playState.moves.length} moves.</p>
+            <div className="game-result-actions">
+              <button className="quiet-button" onClick={() => setShowGameResult(false)} type="button">See final board</button>
+              <button className="quiet-button primary-quiet" onClick={resetPlay} type="button"><RotateCcw size={15} />New game</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
