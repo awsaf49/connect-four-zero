@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 import uuid
@@ -119,6 +120,8 @@ class TrainingController:
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.started_at = 0.0
+        self.accumulated_elapsed = 0.0
+        self.pause_started_at: float | None = None
         self.step = 0
         self.generation = 0
         self.device = resolve_device(config.allow_cpu)
@@ -145,12 +148,14 @@ class TrainingController:
             self.step = int(payload["step"])
             self.generation = int(payload["generation"])
             return
-        checkpoints = [item for item in self.store.list_checkpoints() if Path(item.path).exists()]
+        checkpoints = [
+            item for item in self.store.list_checkpoints() if item.kind != "demo" and Path(item.path).exists()
+        ]
         if not checkpoints:
             return
         latest_training = max(checkpoints, key=lambda item: (item.training_step, item.created_at))
         champion_candidates = [
-            item for item in checkpoints if item.kind in {"initial", "champion", "final", "demo"}
+            item for item in checkpoints if item.kind in {"initial", "champion", "final"}
         ]
         latest_champion = max(
             champion_candidates or checkpoints,
@@ -170,16 +175,25 @@ class TrainingController:
         self.thread.start()
 
     def pause(self) -> None:
+        if self.pause_event.is_set():
+            return
+        self.pause_started_at = time.monotonic()
         self.pause_event.set()
-        self.store.update_run(status=RunStatus.PAUSED, phase="paused")
+        self.store.update_run(status=RunStatus.PAUSED, phase="paused", elapsed_seconds=self._elapsed())
         self._emit("run_status", status="paused")
 
     def resume(self) -> None:
+        if self.pause_started_at is not None:
+            self.started_at += time.monotonic() - self.pause_started_at
+            self.pause_started_at = None
         self.pause_event.clear()
         self.store.update_run(status=RunStatus.RUNNING)
         self._emit("run_status", status="running")
 
     def stop(self) -> None:
+        if self.pause_started_at is not None:
+            self.started_at += time.monotonic() - self.pause_started_at
+            self.pause_started_at = None
         self.stop_event.set()
         self.pause_event.clear()
         self.store.update_run(status=RunStatus.STOPPING, phase="stopping")
@@ -195,22 +209,28 @@ class TrainingController:
     def _budget_exhausted(self) -> bool:
         if self.stop_event.is_set():
             return True
-        return self.config.minutes is not None and time.monotonic() - self.started_at >= self.config.minutes * 60
+        return self.config.minutes is not None and self._elapsed() >= self.config.minutes * 60
+
+    def _elapsed(self) -> float:
+        now = self.pause_started_at if self.pause_started_at is not None else time.monotonic()
+        return self.accumulated_elapsed + max(0.0, now - self.started_at)
 
     def _run(self) -> None:
-        self.started_at = time.monotonic()
         run = self.store.get_run()
         if run is None:
             raise RuntimeError("store must contain a run before training starts")
-        self.store.update_run(status=RunStatus.RUNNING, phase="initializing")
+        self.accumulated_elapsed = run.elapsed_seconds
+        self.started_at = time.monotonic()
+        self.store.update_run(status=RunStatus.RUNNING, phase="initializing", worker_pid=os.getpid())
         self.tracker = WandbTracker(run.id, self.config.model_dump(), self.config.wandb_mode, self.store.root)
         try:
-            self._save_checkpoint("initial", score=None)
+            if not self.store.list_checkpoints():
+                self._save_checkpoint("initial", score=None)
             while not self._budget_exhausted():
                 self._wait_if_paused()
                 if self._budget_exhausted():
                     break
-                self.store.update_run(phase="self_play", generation=self.generation)
+                self.store.update_run(phase="self_play", generation=self.generation, elapsed_seconds=self._elapsed())
                 self._emit("phase", phase="self_play", generation=self.generation)
                 examples, games = self._self_play(self.config.self_play_games)
                 if not examples:
@@ -220,11 +240,11 @@ class TrainingController:
                     self.store.add_game(game)
                 self.replay.save(self.store.replay_path)
 
-                self.store.update_run(phase="training")
+                self.store.update_run(phase="training", elapsed_seconds=self._elapsed())
                 losses = self._train_candidate()
                 candidate = self._save_checkpoint("candidate", score=None)
 
-                self.store.update_run(phase="evaluation")
+                self.store.update_run(phase="evaluation", elapsed_seconds=self._elapsed())
                 score = self._evaluate_candidate()
                 promoted = score > self.config.promotion_threshold
                 if promoted:
@@ -234,7 +254,7 @@ class TrainingController:
                 else:
                     candidate = self._save_checkpoint("rejected", score=score)
 
-                elapsed = time.monotonic() - self.started_at
+                elapsed = self._elapsed()
                 values: dict[str, float | int | str | bool] = {
                     **losses,
                     "evaluation/score": score,
@@ -253,15 +273,16 @@ class TrainingController:
                 self._emit("iteration", **values)
 
             final = self._save_checkpoint("final", score=None)
-            elapsed = time.monotonic() - self.started_at
-            status = RunStatus.COMPLETED
-            self.store.update_run(status=status, phase="complete", elapsed_seconds=elapsed, generation=self.generation)
+            elapsed = self._elapsed()
+            status = RunStatus.STOPPED if self.stop_event.is_set() else RunStatus.COMPLETED
+            phase = "stopped" if status == RunStatus.STOPPED else "complete"
+            self.store.update_run(status=status, phase=phase, elapsed_seconds=elapsed, generation=self.generation, worker_pid=None)
             self.replay.save(self.store.replay_path)
-            self._emit("run_status", status="completed", checkpoint=final.model_dump(mode="json"))
+            self._emit("run_status", status=status.value, checkpoint=final.model_dump(mode="json"))
             if self.tracker:
                 self.tracker.finish()
         except Exception as exc:
-            self.store.update_run(status=RunStatus.FAILED, phase="failed", error=str(exc))
+            self.store.update_run(status=RunStatus.FAILED, phase="failed", error=str(exc), worker_pid=None)
             self._emit("run_status", status="failed", error=str(exc))
             if self.tracker:
                 self.tracker.finish(exit_code=1)
@@ -269,7 +290,7 @@ class TrainingController:
     def _learning_rate(self) -> float:
         if self.config.minutes is None:
             return 0.05 if self.step < 2_000 else 0.01 if self.step < 10_000 else 0.001
-        progress = min(1.0, (time.monotonic() - self.started_at) / (self.config.minutes * 60))
+        progress = min(1.0, self._elapsed() / (self.config.minutes * 60))
         return 0.05 if progress < 0.5 else 0.01 if progress < 0.8 else 0.001
 
     def _train_candidate(self) -> dict[str, float]:
@@ -423,7 +444,7 @@ class TrainingController:
         return score / len(games)
 
     def _save_checkpoint(self, kind: str, score: float | None) -> CheckpointRecord:
-        checkpoint_id = f"g{self.generation:03d}-s{self.step:06d}-{kind}"
+        checkpoint_id = f"{self.store.root.name[-6:]}-g{self.generation:03d}-s{self.step:06d}-{kind}"
         path = self.store.checkpoint_dir / f"{checkpoint_id}.pt"
         model = self.champion_model if kind in {"initial", "champion", "final"} else self.training_model
         evaluator = PolicyValueEvaluator(model, device=self.device, allow_cpu=self.config.allow_cpu)

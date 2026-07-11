@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Sequence
 
@@ -88,14 +89,16 @@ class PolicyValueEvaluator:
         if self.device.type == "cpu" and not allow_cpu:
             raise RuntimeError("CPU evaluator requires allow_cpu=True")
         self.model = model.to(self.device)
+        self._predict_lock = threading.RLock()
 
     def predict(self, states: Sequence[ConnectFour]) -> tuple[np.ndarray, np.ndarray]:
         if not states:
             return np.empty((0, COLS), np.float32), np.empty((0,), np.float32)
-        batch = torch.from_numpy(np.stack([state.encode() for state in states])).to(self.device)
-        self.model.eval()
-        with torch.inference_mode():
-            logits, values = self.model(batch)
+        with self._predict_lock:
+            batch = torch.from_numpy(np.stack([state.encode() for state in states])).to(self.device)
+            self.model.eval()
+            with torch.inference_mode():
+                logits, values = self.model(batch)
         return logits.float().cpu().numpy(), values.float().cpu().numpy()
 
     def save(self, path: Path, metadata: dict[str, object] | None = None) -> None:
@@ -139,4 +142,3 @@ class PolicyValueEvaluator:
                 }
             )
         return metrics
-

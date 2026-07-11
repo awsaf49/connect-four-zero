@@ -17,12 +17,13 @@ from .network import PolicyValueNet
 from .demo import install_bundled_demo
 from .export import export_replay
 from .schemas import RunConfig, SystemStatus
-from .service import ArenaService, EventBroker, TrainingManager
+from .service import ArenaService, EventBroker, TrainingManager, reconcile_interrupted_runs
 from .store import RunRepository
 
 RUNS_ROOT = Path(os.getenv("CONNECT4_RUNS_DIR", "runs"))
 repository = RunRepository(RUNS_ROOT)
 install_bundled_demo(repository)
+reconcile_interrupted_runs(repository)
 broker = EventBroker()
 training = TrainingManager(repository, broker)
 arena = ArenaService(repository)
@@ -48,13 +49,20 @@ class RunActionRequest(BaseModel):
 
 class CreateGameRequest(BaseModel):
     difficulty: str = "champion"
-    human_player: int = 1
+    human_player: int = Field(default=1, ge=1, le=2)
     checkpoint_id: str | None = None
-    simulations: int | None = None
+    simulations: int | None = Field(default=None, ge=1, le=2_000)
 
 
 class MoveRequest(BaseModel):
     action: int
+
+
+class SearchPositionRequest(BaseModel):
+    board: list[list[int]]
+    current_player: int
+    simulations: int = Field(default=256, ge=1, le=2_000)
+    checkpoint_id: str | None = None
 
 
 @app.get("/api/system", response_model=SystemStatus)
@@ -77,14 +85,15 @@ def list_runs() -> list[dict[str, Any]]:
 
 @app.post("/api/runs", status_code=201)
 def create_run(request: CreateRunRequest) -> dict[str, Any]:
-    if training.active_run_id:
-        raise HTTPException(409, "A training run is already active")
     if not request.config.allow_cpu and not torch.backends.mps.is_available():
         raise HTTPException(503, "MPS is required for production training")
     config = request.config
     if config.wandb_mode == "online" and not _wandb_available():
         config = config.model_copy(update={"wandb_mode": "offline"})
-    return training.create(config, request.name).model_dump(mode="json")
+    try:
+        return training.create(config, request.name).model_dump(mode="json")
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/runs/{run_id}")
@@ -101,7 +110,7 @@ def run_action(run_id: str, request: RunActionRequest) -> dict[str, Any]:
         return training.action(run_id, request.action).model_dump(mode="json")
     except KeyError:
         raise HTTPException(404, "Active run not found") from None
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
@@ -155,6 +164,14 @@ def download_run_export(run_id: str, filename: str) -> FileResponse:
 def create_game(request: CreateGameRequest) -> dict[str, Any]:
     try:
         return arena.create_game(**request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/search")
+def search_position(request: SearchPositionRequest) -> dict[str, Any]:
+    try:
+        return arena.analyze_position(**request.model_dump())
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

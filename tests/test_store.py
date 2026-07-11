@@ -25,3 +25,14 @@ def test_store_round_trip(tmp_path: Path) -> None:
     assert store.get_game("g-1") == game
     assert RunRepository(tmp_path).list_runs()[0].id == "run-test"
 
+
+def test_store_instances_share_atomic_run_updates(tmp_path: Path) -> None:
+    first = RunStore(tmp_path, "shared")
+    second = RunStore(tmp_path, "shared")
+    first.create_run(RunRecord(id="shared", name="Shared", status=RunStatus.CREATED, config=RunConfig()))
+    first.update_run(status=RunStatus.RUNNING)
+    second.update_run(phase="self_play")
+    current = first.get_run()
+    assert current is not None
+    assert current.status == RunStatus.RUNNING
+    assert current.phase == "self_play"

@@ -65,40 +65,61 @@ class TrainingManager:
         return None
 
     def create(self, config: RunConfig, name: str | None = None) -> RunRecord:
-        run_id = f"run-{uuid.uuid4().hex[:12]}"
-        run = RunRecord(
-            id=run_id,
-            name=name or f"Zero run {run_id[-4:]}",
-            status=RunStatus.CREATED,
-            config=config,
-        )
-        store = self.repository.open(run_id)
-        store.create_run(run)
-        controller = TrainingController(store, config, self.broker.publish)
         with self._lock:
+            active_statuses = {
+                RunStatus.CREATED,
+                RunStatus.RUNNING,
+                RunStatus.PAUSED,
+                RunStatus.STOPPING,
+                RunStatus.INTERRUPTED,
+            }
+            if self.active_run_id or any(run.status in active_statuses for run in self.repository.list_runs()):
+                raise RuntimeError("A training run is already active")
+            run_id = f"run-{uuid.uuid4().hex[:12]}"
+            run = RunRecord(
+                id=run_id,
+                name=name or f"Zero run {run_id[-4:]}",
+                status=RunStatus.CREATED,
+                config=config,
+            )
+            store = self.repository.open(run_id)
+            store.create_run(run)
+            controller = TrainingController(store, config, self.broker.publish)
             self.controllers[run_id] = controller
-        controller.start()
+            controller.start()
         return run
 
     def action(self, run_id: str, action: str) -> RunRecord:
-        controller = self.controllers.get(run_id)
-        store = self.repository.open(run_id)
-        if controller is None and action == "resume":
+        with self._lock:
+            controller = self.controllers.get(run_id)
+            store = self.repository.open(run_id)
             run = store.get_run()
             if run is None:
                 raise KeyError(run_id)
-            controller = TrainingController(store, run.config, self.broker.publish)
-            with self._lock:
+            if action == "resume" and controller is None:
+                if run.status not in {RunStatus.PAUSED, RunStatus.INTERRUPTED}:
+                    raise ValueError(f"run in status {run.status.value} cannot be resumed")
+                if run.id == "demo-bundled":
+                    raise ValueError("the bundled demo is read-only")
+                if self.active_run_id:
+                    raise RuntimeError("A training run is already active")
+                controller = TrainingController(store, run.config, self.broker.publish)
                 self.controllers[run_id] = controller
-            controller.start()
-            return store.get_run() or run
-        if controller is None:
-            raise KeyError(run_id)
+                controller.start()
+                return store.get_run() or run
+            if controller is None:
+                raise KeyError(run_id)
         if action == "pause":
+            if run.status != RunStatus.RUNNING:
+                raise ValueError(f"run in status {run.status.value} cannot be paused")
             controller.pause()
         elif action == "resume":
+            if run.status != RunStatus.PAUSED or not (controller.thread and controller.thread.is_alive()):
+                raise ValueError(f"run in status {run.status.value} cannot be resumed")
             controller.resume()
         elif action == "stop":
+            if run.status not in {RunStatus.RUNNING, RunStatus.PAUSED}:
+                raise ValueError(f"run in status {run.status.value} cannot be stopped")
             controller.stop()
         else:
             raise ValueError(action)
@@ -127,6 +148,7 @@ class HumanGame:
     search: MCTS
     root: Node | None = None
     moves: list[MoveTrace] = field(default_factory=list)
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 class ArenaService:
@@ -136,6 +158,7 @@ class ArenaService:
         self._evaluators: dict[str, PolicyValueEvaluator] = {}
         self._lock = threading.RLock()
         self.auditor = NegamaxSolver(max_nodes=250_000, max_seconds=0.35)
+        self._auditor_lock = threading.RLock()
 
     def available_checkpoints(self) -> list[CheckpointRecord]:
         records: list[CheckpointRecord] = []
@@ -145,11 +168,17 @@ class ArenaService:
 
     def _pick_checkpoint(self, difficulty: str, checkpoint_id: str | None) -> CheckpointRecord | None:
         checkpoints = self.available_checkpoints()
+        deployable = [item for item in checkpoints if item.kind in {"champion", "final", "demo"}]
         if checkpoint_id:
-            return next((item for item in checkpoints if item.id == checkpoint_id), None)
-        champions = [item for item in checkpoints if item.kind in {"champion", "final", "demo"}]
+            matches = [item for item in deployable if item.id == checkpoint_id]
+            if len(matches) > 1:
+                raise ValueError("checkpoint id is ambiguous; use a run-qualified checkpoint")
+            if not matches:
+                raise ValueError("checkpoint is not deployable")
+            return matches[0]
+        champions = deployable
         if not champions:
-            return checkpoints[-1] if checkpoints else None
+            return None
         champions.sort(key=lambda item: (item.generation, item.training_step, item.created_at))
         if difficulty == "beginner":
             return champions[0]
@@ -158,7 +187,7 @@ class ArenaService:
         return champions[-1]
 
     def _load_evaluator(self, checkpoint: CheckpointRecord | None) -> PolicyValueEvaluator:
-        key = checkpoint.id if checkpoint else "untrained"
+        key = str(Path(checkpoint.path).resolve()) if checkpoint else "untrained"
         with self._lock:
             if key in self._evaluators:
                 return self._evaluators[key]
@@ -182,7 +211,7 @@ class ArenaService:
             raise ValueError("human_player must be 1 or 2")
         checkpoint = self._pick_checkpoint(difficulty, checkpoint_id)
         evaluator = self._load_evaluator(checkpoint)
-        count = simulations or DIFFICULTY_SIMULATIONS.get(difficulty, 256)
+        count = simulations if simulations is not None else DIFFICULTY_SIMULATIONS.get(difficulty, 256)
         game = HumanGame(
             id=f"game-{uuid.uuid4().hex[:12]}",
             state=ConnectFour.new(),
@@ -200,35 +229,57 @@ class ArenaService:
         game = self.games.get(game_id)
         if game is None:
             raise KeyError(game_id)
-        if game.state.is_terminal:
-            raise ValueError("game is already complete")
-        if game.state.current_player != game.human_player:
-            raise ValueError("it is not the human player's turn")
-        analysis, _ = game.search.search(game.state, record_snapshots=True)
-        before = game.state
-        audit = self.auditor.grade_moves(Position.from_game(before))
-        game.state = before.play(action)
-        human_trace = self._trace(before, game.state, action, analysis)
-        grade = audit.grades.get(action)
-        human_trace.solver_grade = self._grade_label(grade.outcome.value, grade.exact) if grade else None
-        game.moves.append(human_trace)
-        game.root = None
-        ai_trace = None if game.state.is_terminal else self._ai_move(game)
-        return self._game_payload(game, human_trace=human_trace, ai_trace=ai_trace)
+        with game.lock:
+            if game.state.is_terminal:
+                raise ValueError("game is already complete")
+            if game.state.current_player != game.human_player:
+                raise ValueError("it is not the human player's turn")
+            analysis, _ = game.search.search(game.state, record_snapshots=True)
+            before = game.state
+            audit = self._grade_position(before)
+            game.state = before.play(action)
+            human_trace = self._trace(before, game.state, action, analysis)
+            grade = audit.grades.get(action)
+            human_trace.solver_grade = self._grade_label(grade.outcome.value, grade.exact) if grade else None
+            game.moves.append(human_trace)
+            game.root = None
+            ai_trace = None if game.state.is_terminal else self._ai_move(game)
+            return self._game_payload(game, human_trace=human_trace, ai_trace=ai_trace)
 
     def analyze(self, game_id: str) -> dict[str, Any]:
         game = self.games.get(game_id)
         if game is None:
             raise KeyError(game_id)
-        if game.state.is_terminal:
-            return {"terminal": True, "winner": game.state.winner}
-        result, _ = game.search.search(game.state, record_snapshots=True)
-        audit = self.auditor.grade_moves(Position.from_game(game.state))
-        return {**self._search_payload(result), "solver": self._audit_payload(audit)}
+        with game.lock:
+            if game.state.is_terminal:
+                return {"terminal": True, "winner": game.state.winner}
+            result, _ = game.search.search(game.state, record_snapshots=True)
+            audit = self._grade_position(game.state)
+            return {**self._search_payload(result), "solver": self._audit_payload(audit)}
+
+    def analyze_position(
+        self,
+        board: list[list[int]],
+        current_player: int,
+        simulations: int = 256,
+        checkpoint_id: str | None = None,
+    ) -> dict[str, Any]:
+        state = ConnectFour(np.asarray(board, dtype=np.int8), current_player=current_player)
+        if state.is_terminal:
+            return {"terminal": True, "winner": state.winner}
+        checkpoint = self._pick_checkpoint("champion", checkpoint_id)
+        evaluator = self._load_evaluator(checkpoint)
+        result, _ = MCTS(evaluator, simulations=simulations, seed=17).search(state, record_snapshots=True)
+        audit = self._grade_position(state)
+        return {
+            **self._search_payload(result),
+            "solver": self._audit_payload(audit),
+            "checkpoint": checkpoint.model_dump(mode="json") if checkpoint else None,
+        }
 
     def _ai_move(self, game: HumanGame) -> MoveTrace:
         before = game.state
-        audit = self.auditor.grade_moves(Position.from_game(before))
+        audit = self._grade_position(before)
         result, root = game.search.search(before, root=game.root, record_snapshots=True)
         action = game.search.select_action(result, 0.0)
         game.state = before.play(action)
@@ -276,6 +327,7 @@ class ArenaService:
     def _search_payload(result: SearchResult) -> dict[str, Any]:
         return {
             "simulations": result.simulations,
+            "tree_size": result.tree_size,
             "priors": [float(value) for value in result.priors],
             "visits": result.visits.tolist(),
             "q_values": [float(value) for value in result.q_values],
@@ -297,6 +349,10 @@ class ArenaService:
     def _grade_label(outcome: str, exact: bool) -> str:
         return f"{outcome}:{'exact' if exact else 'bounded'}"
 
+    def _grade_position(self, state: ConnectFour) -> Any:
+        with self._auditor_lock:
+            return self.auditor.grade_moves(Position.from_game(state))
+
     @staticmethod
     def _audit_payload(audit: Any) -> dict[str, Any]:
         return {
@@ -314,3 +370,25 @@ class ArenaService:
                 for action, grade in audit.grades.items()
             },
         }
+
+
+def reconcile_interrupted_runs(repository: RunRepository) -> None:
+    for run in repository.list_runs():
+        if run.status != RunStatus.RUNNING:
+            continue
+        if run.worker_pid is None:
+            continue
+        alive = False
+        try:
+            import os
+
+            os.kill(run.worker_pid, 0)
+            alive = True
+        except OSError:
+            alive = False
+        if not alive:
+            repository.open(run.id).update_run(
+                status=RunStatus.INTERRUPTED,
+                phase="interrupted",
+                worker_pid=None,
+            )

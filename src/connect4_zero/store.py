@@ -10,6 +10,9 @@ from .schemas import CheckpointRecord, GameReplay, MetricSample, RunConfig, RunR
 
 
 class RunStore:
+    _registry_guard = threading.Lock()
+    _lock_registry: dict[str, threading.RLock] = {}
+
     def __init__(self, root: Path, run_id: str) -> None:
         self.root = root / run_id
         self.root.mkdir(parents=True, exist_ok=True)
@@ -19,7 +22,9 @@ class RunStore:
         self.export_dir.mkdir(exist_ok=True)
         self.replay_path = self.root / "replay_buffer.npz"
         self.database_path = self.root / "run.sqlite3"
-        self._lock = threading.RLock()
+        lock_key = str(self.database_path.resolve())
+        with self._registry_guard:
+            self._lock = self._lock_registry.setdefault(lock_key, threading.RLock())
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -73,12 +78,23 @@ class RunStore:
         return RunRecord.model_validate_json(row["payload"]) if row else None
 
     def update_run(self, **changes: object) -> RunRecord:
-        run = self.get_run()
-        if run is None:
-            raise RuntimeError("run has not been initialized")
-        updated = run.model_copy(update={**changes, "updated_at": utc_now()})
-        self.create_run(updated)
-        return updated
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT payload FROM run LIMIT 1").fetchone()
+            if row is None:
+                raise RuntimeError("run has not been initialized")
+            run = RunRecord.model_validate_json(row["payload"])
+            updated = run.model_copy(update={**changes, "updated_at": utc_now()})
+            connection.execute(
+                "INSERT OR REPLACE INTO run(id, payload) VALUES (?, ?)",
+                (updated.id, updated.model_dump_json()),
+            )
+            return updated
+
+    def count_games(self) -> int:
+        with self._lock, self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) AS total FROM games").fetchone()
+        return int(row["total"])
 
     def add_metric(self, metric: MetricSample) -> None:
         with self._lock, self._connect() as connection:
@@ -151,4 +167,3 @@ class RunRepository:
             if run:
                 runs.append(run)
         return sorted(runs, key=lambda run: run.created_at, reverse=True)
-

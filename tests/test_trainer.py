@@ -5,6 +5,9 @@ from pathlib import Path
 from connect4_zero.schemas import RunConfig, RunRecord, RunStatus
 from connect4_zero.store import RunStore
 from connect4_zero.trainer import TrainingController
+from connect4_zero.trainer import ReplayBuffer, TrainingExample
+from connect4_zero.game import ConnectFour
+import numpy as np
 
 
 def test_small_self_play_and_train_cycle(tmp_path: Path) -> None:
@@ -52,3 +55,33 @@ def test_training_module_cannot_import_auditor() -> None:
     assert "connect4_zero.auditor" not in source
     assert "from .auditor" not in source
 
+
+def test_explicit_stop_has_distinct_terminal_status(tmp_path: Path) -> None:
+    config = RunConfig(
+        minutes=1,
+        simulations=1,
+        self_play_games=1,
+        evaluation_games=2,
+        training_steps=1,
+        batch_size=2,
+        allow_cpu=True,
+        wandb_mode="disabled",
+    )
+    store = RunStore(tmp_path, "stop-test")
+    store.create_run(RunRecord(id="stop-test", name="Stop", status=RunStatus.CREATED, config=config))
+    trainer = TrainingController(store, config)
+    trainer.stop()
+    trainer.start()
+    trainer.join(10)
+    assert store.get_run().status == RunStatus.STOPPED  # type: ignore[union-attr]
+
+
+def test_replay_augmentation_preserves_value_and_policy_geometry() -> None:
+    state = ConnectFour.from_moves([0, 1, 0])
+    policy = np.array([1, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+    replay = ReplayBuffer(capacity=10, seed=3)
+    replay.extend([TrainingExample(state.encode(), policy, -1.0)])
+    boards, policies, values = replay.sample(64)
+    assert set(np.argmax(policies, axis=1)).issubset({0, 6})
+    assert np.all(values == -1.0)
+    assert all(np.array_equal(board[0] + board[1], state.encode()[0] + state.encode()[1]) or np.array_equal(board[0] + board[1], np.flip(state.encode()[0] + state.encode()[1], axis=1)) for board in boards)
