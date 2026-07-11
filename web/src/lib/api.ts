@@ -257,11 +257,17 @@ export const apiClient = {
   async getReplays(): Promise<ApiResult<ReplayPayload[]>> {
     const runs = await request<BackendRun[]>("/api/runs");
     if (!runs?.length) return { data: DEMO_REPLAYS, source: "demo" };
-    const groups = await Promise.all(runs.slice(0, 4).map(async (run) => {
+    const [humanGames, groups] = await Promise.all([
+      request<BackendReplay[]>("/api/runs/human-games/games?limit=12"),
+      Promise.all(runs.slice(0, 4).map(async (run) => {
       const games = await request<BackendReplay[]>(`/api/runs/${run.id}/games?limit=8`);
       return (games ?? []).map((game) => replayFromBackend(game, run.config.simulations));
-    }));
-    const replays = groups.flat();
+      })),
+    ]);
+    const replays = [
+      ...(humanGames ?? []).map((game) => replayFromBackend(game, game.moves.at(0)?.search?.simulations ?? 800)),
+      ...groups.flat(),
+    ];
     return { data: replays.length ? replays : DEMO_REPLAYS, source: replays.length ? "api" : "demo" };
   },
 

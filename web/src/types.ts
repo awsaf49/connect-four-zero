@@ -107,7 +107,7 @@ export const DIFFICULTIES: Record<
   },
   champion: {
     label: "Champion",
-    detail: "The final checkpoint thinking deeply",
+    detail: "Best after 1 hour; strong, not perfect",
     simulations: 800,
     temperature: 0.08,
   },

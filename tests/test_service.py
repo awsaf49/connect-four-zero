@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from connect4_zero.game import ConnectFour
 from connect4_zero.schemas import CheckpointRecord, RunConfig, RunRecord, RunStatus
-from connect4_zero.service import ArenaService, EventBroker, TrainingManager, reconcile_interrupted_runs
+from connect4_zero.service import ArenaService, EventBroker, HumanGame, TrainingManager, reconcile_interrupted_runs
 from connect4_zero.store import RunRepository
 
 
@@ -62,3 +63,25 @@ def test_candidate_checkpoint_is_not_publicly_deployable(tmp_path: Path) -> None
     )
     with pytest.raises(ValueError, match="not deployable"):
         ArenaService(repository).create_game(checkpoint_id="same-id")
+
+
+def test_completed_human_game_is_persisted_once(tmp_path: Path) -> None:
+    repository = RunRepository(tmp_path)
+    arena = ArenaService(repository)
+    game = HumanGame(
+        id="human-win",
+        state=ConnectFour.from_moves([0, 6, 1, 6, 2, 5, 3]),
+        human_player=1,
+        difficulty="champion",
+        checkpoint=None,
+        evaluator=None,  # type: ignore[arg-type]
+        search=type("Search", (), {"simulations": 800})(),  # type: ignore[arg-type]
+    )
+
+    arena._persist_completed_game(game)
+    arena._persist_completed_game(game)
+
+    saved = repository.open("human-games").list_games()
+    assert len(saved) == 1
+    assert saved[0].winner == 1
+    assert saved[0].metadata["simulations"] == 800

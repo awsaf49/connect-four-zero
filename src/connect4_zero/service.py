@@ -148,6 +148,7 @@ class HumanGame:
     search: MCTS
     root: Node | None = None
     moves: list[MoveTrace] = field(default_factory=list)
+    persisted: bool = False
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -244,7 +245,32 @@ class ArenaService:
             game.moves.append(human_trace)
             game.root = None
             ai_trace = None if game.state.is_terminal else self._ai_move(game)
+            self._persist_completed_game(game)
             return self._game_payload(game, human_trace=human_trace, ai_trace=ai_trace)
+
+    def _persist_completed_game(self, game: HumanGame) -> None:
+        if game.persisted or not game.state.is_terminal:
+            return
+        checkpoint = game.checkpoint.id if game.checkpoint else "untrained"
+        human = "human"
+        self.repository.open("human-games").add_game(
+            GameReplay(
+                id=game.id,
+                run_id="human-games",
+                source="human",
+                player_one=human if game.human_player == 1 else checkpoint,
+                player_two=checkpoint if game.human_player == 1 else human,
+                winner=game.state.winner,
+                moves=list(game.moves),
+                metadata={
+                    "difficulty": game.difficulty,
+                    "checkpoint": checkpoint,
+                    "simulations": game.search.simulations,
+                    "human_player": game.human_player,
+                },
+            )
+        )
+        game.persisted = True
 
     def analyze(self, game_id: str) -> dict[str, Any]:
         game = self.games.get(game_id)
