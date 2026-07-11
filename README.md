@@ -27,3 +27,8 @@ make test
 make train-60
 ```
 
+Compare any checkpoint against a deterministic suite of exact late-game probes:
+
+```bash
+conda run -n connect4-zero connect4-zero audit-accuracy runs/<run-id>/checkpoints/<checkpoint>.pt
+```

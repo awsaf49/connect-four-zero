@@ -12,7 +12,7 @@ import uvicorn
 
 from .network import PolicyValueNet
 from .network import PolicyValueEvaluator
-from .evaluation import play_vs_random
+from .evaluation import play_vs_random, solver_move_accuracy
 from .schemas import RunConfig, RunRecord, RunStatus
 from .store import RunStore
 from .trainer import TrainingController
@@ -38,6 +38,11 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("checkpoint", type=Path)
     evaluate.add_argument("--games", type=int, default=200)
     evaluate.add_argument("--simulations", type=int, default=64)
+    audit = commands.add_parser("audit-accuracy", help="score a checkpoint on deterministic exact-solver probes")
+    audit.add_argument("checkpoint", type=Path)
+    audit.add_argument("--positions", type=int, default=40)
+    audit.add_argument("--simulations", type=int, default=64)
+    audit.add_argument("--seed", type=int, default=41)
     return parser
 
 
@@ -63,6 +68,16 @@ def main() -> None:
     if args.command == "evaluate":
         evaluator, metadata = PolicyValueEvaluator.load(args.checkpoint)
         result = play_vs_random(evaluator, games=args.games, simulations=args.simulations)
+        print(json.dumps({"checkpoint": str(args.checkpoint), "metadata": metadata, **result.as_dict()}, indent=2))
+        return
+    if args.command == "audit-accuracy":
+        evaluator, metadata = PolicyValueEvaluator.load(args.checkpoint)
+        result = solver_move_accuracy(
+            evaluator,
+            positions=args.positions,
+            simulations=args.simulations,
+            seed=args.seed,
+        )
         print(json.dumps({"checkpoint": str(args.checkpoint), "metadata": metadata, **result.as_dict()}, indent=2))
         return
 
