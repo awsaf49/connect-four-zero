@@ -83,12 +83,14 @@ class PolicyValueEvaluator:
         model: PolicyValueNet,
         device: torch.device | str | None = None,
         allow_cpu: bool = False,
+        mixed_precision: bool = True,
     ) -> None:
         os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "0")
         self.device = torch.device(device) if device is not None else resolve_device(allow_cpu)
         if self.device.type == "cpu" and not allow_cpu:
             raise RuntimeError("CPU evaluator requires allow_cpu=True")
         self.model = model.to(self.device)
+        self.mixed_precision = mixed_precision and self.device.type == "mps"
         self._predict_lock = threading.RLock()
 
     def predict(self, states: Sequence[ConnectFour]) -> tuple[np.ndarray, np.ndarray]:
@@ -98,7 +100,8 @@ class PolicyValueEvaluator:
             batch = torch.from_numpy(np.stack([state.encode() for state in states])).to(self.device)
             self.model.eval()
             with torch.inference_mode():
-                logits, values = self.model(batch)
+                with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.mixed_precision):
+                    logits, values = self.model(batch)
         return logits.float().cpu().numpy(), values.float().cpu().numpy()
 
     def save(self, path: Path, metadata: dict[str, object] | None = None) -> None:
@@ -122,11 +125,12 @@ class PolicyValueEvaluator:
         path: Path,
         device: torch.device | str | None = None,
         allow_cpu: bool = False,
+        mixed_precision: bool = True,
     ) -> tuple[PolicyValueEvaluator, dict[str, object]]:
         payload = torch.load(path, map_location="cpu", weights_only=True)
         model = PolicyValueNet(int(payload["channels"]), int(payload["blocks"]))
         model.load_state_dict(payload["model"])
-        return cls(model, device=device, allow_cpu=allow_cpu), dict(payload.get("metadata", {}))
+        return cls(model, device=device, allow_cpu=allow_cpu, mixed_precision=mixed_precision), dict(payload.get("metadata", {}))
 
     def mps_metrics(self) -> dict[str, float | str | bool]:
         metrics: dict[str, float | str | bool] = {

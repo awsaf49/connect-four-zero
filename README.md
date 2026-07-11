@@ -4,6 +4,8 @@ A local, inspectable AlphaGo Zero system for standard 7x6 Connect Four. It train
 
 Profile faithful model, batch-size, and mixed-precision variants with `connect4-zero benchmark-mps`. The benchmark measures both optimization and inference throughput so faster training does not hide slower self-play.
 
+The measured M5 Max default is batch size 1024 with MPS FP16 autocast. Checkpoints retain FP32 master weights, and CPU debug runs remain FP32.
+
 ## Setup
 
 ```bash

@@ -239,9 +239,13 @@ class TrainingController:
                 for game in games:
                     self.store.add_game(game)
                 self.replay.save(self.store.replay_path)
+                if self._budget_exhausted():
+                    break
 
                 self.store.update_run(phase="training", elapsed_seconds=self._elapsed())
                 losses = self._train_candidate()
+                if self._budget_exhausted():
+                    break
                 candidate = self._save_checkpoint("candidate", score=None)
 
                 self.store.update_run(phase="evaluation", elapsed_seconds=self._elapsed())
@@ -297,6 +301,7 @@ class TrainingController:
         self.training_model.train()
         totals = np.zeros(3, dtype=np.float64)
         steps = self.config.training_steps
+        completed_steps = 0
         started = time.perf_counter()
         for _ in range(steps):
             if self._budget_exhausted():
@@ -308,30 +313,42 @@ class TrainingController:
             z = torch.from_numpy(target_value).to(self.device)
             for group in self.optimizer.param_groups:
                 group["lr"] = self._learning_rate()
-            logits, values = self.training_model(x)
-            policy_loss = -(pi * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
-            value_loss = nn.functional.mse_loss(values, z)
-            loss = policy_loss + value_loss
+            with torch.autocast(
+                device_type=self.device.type,
+                dtype=torch.float16,
+                enabled=self.config.mixed_precision and self.device.type == "mps",
+            ):
+                logits, values = self.training_model(x)
+                policy_loss = -(pi * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
+                value_loss = nn.functional.mse_loss(values.float(), z)
+                loss = policy_loss + value_loss
             self.optimizer.zero_grad(set_to_none=True)
             loss.backward()
             self.optimizer.step()
             totals += [float(loss.detach()), float(policy_loss.detach()), float(value_loss.detach())]
             self.step += 1
+            completed_steps += 1
         if self.device.type == "mps":
             torch.mps.synchronize()
         elapsed = max(time.perf_counter() - started, 1e-6)
-        divisor = max(1, steps)
+        divisor = max(1, completed_steps)
         return {
             "loss/total": totals[0] / divisor,
             "loss/policy": totals[1] / divisor,
             "loss/value": totals[2] / divisor,
-            "training/steps": float(steps),
-            "training/positions_per_second": steps * self.config.batch_size / elapsed,
+            "training/steps": float(completed_steps),
+            "training/positions_per_second": completed_steps * self.config.batch_size / elapsed,
             "training/learning_rate": self._learning_rate(),
+            "training/mixed_precision": self.config.mixed_precision and self.device.type == "mps",
         }
 
     def _self_play(self, count: int) -> tuple[list[TrainingExample], list[GameReplay]]:
-        evaluator = PolicyValueEvaluator(self.champion_model, device=self.device, allow_cpu=self.config.allow_cpu)
+        evaluator = PolicyValueEvaluator(
+            self.champion_model,
+            device=self.device,
+            allow_cpu=self.config.allow_cpu,
+            mixed_precision=self.config.mixed_precision,
+        )
         search = MCTS(
             evaluator,
             simulations=self.config.simulations,
@@ -399,8 +416,18 @@ class TrainingController:
         return examples, replays
 
     def _evaluate_candidate(self) -> float:
-        candidate_eval = PolicyValueEvaluator(self.training_model, device=self.device, allow_cpu=self.config.allow_cpu)
-        champion_eval = PolicyValueEvaluator(self.champion_model, device=self.device, allow_cpu=self.config.allow_cpu)
+        candidate_eval = PolicyValueEvaluator(
+            self.training_model,
+            device=self.device,
+            allow_cpu=self.config.allow_cpu,
+            mixed_precision=self.config.mixed_precision,
+        )
+        champion_eval = PolicyValueEvaluator(
+            self.champion_model,
+            device=self.device,
+            allow_cpu=self.config.allow_cpu,
+            mixed_precision=self.config.mixed_precision,
+        )
         candidate_search = MCTS(candidate_eval, simulations=self.config.evaluation_simulations, seed=self.config.seed + self.step)
         champion_search = MCTS(champion_eval, simulations=self.config.evaluation_simulations, seed=self.config.seed + self.step + 1)
         games = [ActiveGame(index=index) for index in range(self.config.evaluation_games)]
@@ -447,7 +474,12 @@ class TrainingController:
         checkpoint_id = f"{self.store.root.name[-6:]}-g{self.generation:03d}-s{self.step:06d}-{kind}"
         path = self.store.checkpoint_dir / f"{checkpoint_id}.pt"
         model = self.champion_model if kind in {"initial", "champion", "final"} else self.training_model
-        evaluator = PolicyValueEvaluator(model, device=self.device, allow_cpu=self.config.allow_cpu)
+        evaluator = PolicyValueEvaluator(
+            model,
+            device=self.device,
+            allow_cpu=self.config.allow_cpu,
+            mixed_precision=self.config.mixed_precision,
+        )
         metadata = {
             "generation": self.generation,
             "training_step": self.step,
@@ -455,6 +487,7 @@ class TrainingController:
             "score": score,
             "parameter_count": model.parameter_count,
             "device": str(self.device),
+            "mixed_precision": self.config.mixed_precision and self.device.type == "mps",
         }
         evaluator.save(path, metadata)
         record = CheckpointRecord(

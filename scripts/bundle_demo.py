@@ -9,6 +9,12 @@ from pathlib import Path
 from connect4_zero.store import RunStore
 
 
+def read_json(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_id")
@@ -37,10 +43,15 @@ def main() -> None:
 
     args.output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(checkpoint.path, args.output / "champion.pt")
+    minutes = max(1, round(run.elapsed_seconds / 60))
+    duration_name = "One-hour" if 55 <= minutes <= 65 else f"{minutes}-minute"
+    solver_zero = read_json(store.root / "solver-accuracy-generation-zero.json")
+    solver_final = read_json(store.root / "solver-accuracy-final.json")
+    optimization = read_json(store.root / "mps-benchmark-stability.json")
     manifest = {
         "version": 1,
         "source_run_id": run.id,
-        "name": "Five-minute self-trained champion",
+        "name": f"{duration_name} self-trained champion",
         "config": run.config.model_dump(mode="json"),
         "generation": run.generation,
         "training_step": checkpoint.training_step,
@@ -49,6 +60,8 @@ def main() -> None:
         "metrics": [item.model_dump(mode="json") for item in metrics],
         "games": curated_games,
         "benchmark": {"opponent": "uniform-random", "games": 200, "wins": 200, "draws": 0, "losses": 0, "simulations": 64},
+        "solver_benchmark": {"generation_zero": solver_zero, "final": solver_final},
+        "optimization_benchmark": optimization,
     }
     (args.output / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")) + "\n")
 

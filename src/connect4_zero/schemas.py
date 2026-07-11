@@ -30,7 +30,8 @@ class RunConfig(BaseModel):
     self_play_games: int = Field(default=64, ge=1, le=1_024)
     evaluation_games: int = Field(default=80, ge=2, le=10_000)
     training_steps: int = Field(default=200, ge=1, le=100_000)
-    batch_size: int = Field(default=512, ge=1, le=65_536)
+    batch_size: int = Field(default=1024, ge=1, le=65_536)
+    mixed_precision: bool = True
     replay_capacity: int = Field(default=100_000, ge=1)
     c_puct: float = Field(default=1.5, gt=0)
     dirichlet_alpha: float = Field(default=0.3, gt=0)
