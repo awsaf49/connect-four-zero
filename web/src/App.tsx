@@ -64,13 +64,15 @@ import {
 } from "./lib/game";
 import { DEMO_EVOLUTION, DEMO_REPLAYS, DEMO_RUNS, analysisFromBackend, apiClient } from "./lib/api";
 import type { BackendMoveTrace, BackendSearch, RemoteGame } from "./lib/api";
-import { playUiSound } from "./lib/sound";
+import { discDropDuration, playUiSound } from "./lib/sound";
 import type {
   DataSource,
   DifficultyId,
   EvolutionPoint,
   GameState,
+  Move,
   OverlayMode,
+  Player,
   PositionAnalysis,
   ReplayPayload,
   RunSummary,
@@ -150,6 +152,13 @@ function latest<T>(values: T[], fallback: T): T {
 function remoteMove(trace: BackendMoveTrace) {
   const row = trace.board_after.findIndex((boardRow) => boardRow[trace.action] !== 0);
   return { column: trace.action, player: trace.player, row: row < 0 ? 5 : row };
+}
+
+function playDiscImpact(move: Move, winner: Player | 0, muted: boolean) {
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const impactDelay = reduceMotion ? 0 : Math.round(discDropDuration(move.row) * 0.72);
+  playUiSound("drop", muted, impactDelay);
+  if (winner) playUiSound("win", muted, impactDelay + 90);
 }
 
 function gameStateFromRemote(game: RemoteGame): GameState {
@@ -420,7 +429,7 @@ function App() {
         setThinking(false);
         return;
       }
-      playUiSound(result.winner ? "win" : "drop", muted);
+      playDiscImpact(result.move, result.winner, muted);
       setPlayState((current) => ({
         ...current,
         board: result.board,
@@ -447,7 +456,6 @@ function App() {
 
   function navigate(nextView: ViewId) {
     setView(nextView);
-    playUiSound("select", muted);
   }
 
   async function startRemoteGame(nextDifficulty: DifficultyId) {
@@ -471,7 +479,7 @@ function App() {
     if (thinking || playState.currentPlayer !== 1 || playState.winner || isBoardFull(playState.board)) return;
     const result = dropPiece(playState.board, column, 1);
     if (!result) return;
-    playUiSound(result.winner ? "win" : "drop", muted);
+    playDiscImpact(result.move, result.winner, muted);
     setPlayState((current) => ({
       ...current,
       board: result.board,
@@ -484,7 +492,10 @@ function App() {
     if (source !== "api" || !remoteGameId) return;
 
     setThinking(true);
-    const game = await apiClient.move(remoteGameId, column);
+    const [game] = await Promise.all([
+      apiClient.move(remoteGameId, column),
+      delay(discDropDuration(result.move.row) + 90),
+    ]);
     if (!game) {
       setSource("demo");
       setThinking(false);
@@ -497,9 +508,10 @@ function App() {
         if (index < search.snapshots.length - 1) await delay(90);
       }
     }
-    setPlayState(gameStateFromRemote(game));
+    const remoteState = gameStateFromRemote(game);
+    setPlayState(remoteState);
     setModelLabel(game.model_label);
-    playUiSound(game.winner ? "win" : "drop", muted);
+    if (remoteState.lastMove) playDiscImpact(remoteState.lastMove, game.winner, muted);
     const nextSearch = game.terminal ? null : await apiClient.analyzeGame(game.id);
     if (nextSearch && !nextSearch.terminal) setPlayAnalysis(analysisFromBackend(nextSearch));
     setThinking(false);
@@ -535,7 +547,7 @@ function App() {
       lastMove: result.move,
     }));
     setLabSnapshotIndex(0);
-    playUiSound("drop", muted);
+    playDiscImpact(result.move, result.winner, muted);
   }
 
   function resetLab() {

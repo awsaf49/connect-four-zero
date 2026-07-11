@@ -1,6 +1,8 @@
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { analysisMetric, formatQ, ROWS, COLS } from "../lib/game";
+import { discDropDuration } from "../lib/sound";
 import type { Board, Move, OverlayMode, Player, PositionAnalysis } from "../types";
 
 interface ConnectFourBoardProps {
@@ -84,7 +86,14 @@ export function ConnectFourBoard({
                 role="gridcell"
                 aria-label={`${cell === 0 ? "Empty" : cell === currentPlayer ? "Your piece" : "Engine piece"}, row ${ROWS - rowIndex}, column ${columnIndex + 1}`}
               >
-                <span className={`piece piece-${cell}`} aria-hidden="true" />
+                <span
+                  className={`piece piece-${cell} ${isLastMove && cell ? "piece-dropping" : ""}`}
+                  style={isLastMove && cell ? {
+                    "--drop-rows": rowIndex + 1,
+                    "--drop-duration": `${discDropDuration(rowIndex)}ms`,
+                  } as CSSProperties : undefined}
+                  aria-hidden="true"
+                />
                 {isLastMove ? <span className="last-move-marker" aria-hidden="true" /> : null}
               </div>
             );
