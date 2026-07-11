@@ -17,7 +17,11 @@ web:
 	npm --prefix web run dev
 
 dev:
-	@echo "Run 'make api' and 'make web' in separate terminals."
+	./scripts/dev.sh
+
+.PHONY: start
+start:
+	./scripts/start.sh
 
 test-core:
 	$(PY) -m pytest tests
@@ -30,4 +34,3 @@ train-60:
 
 build:
 	npm --prefix web run build
-

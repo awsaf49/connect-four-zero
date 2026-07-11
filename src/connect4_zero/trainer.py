@@ -134,6 +134,26 @@ class TrainingController:
             weight_decay=1e-4,
         )
         self.tracker: WandbTracker | None = None
+        self._restore_if_available()
+
+    def _restore_if_available(self) -> None:
+        checkpoints = [item for item in self.store.list_checkpoints() if Path(item.path).exists()]
+        if not checkpoints:
+            return
+        latest_training = max(checkpoints, key=lambda item: (item.training_step, item.created_at))
+        champion_candidates = [
+            item for item in checkpoints if item.kind in {"initial", "champion", "final", "demo"}
+        ]
+        latest_champion = max(
+            champion_candidates or checkpoints,
+            key=lambda item: (item.generation, item.training_step, item.created_at),
+        )
+        training_payload = torch.load(latest_training.path, map_location="cpu", weights_only=True)
+        champion_payload = torch.load(latest_champion.path, map_location="cpu", weights_only=True)
+        self.training_model.load_state_dict(training_payload["model"])
+        self.champion_model.load_state_dict(champion_payload["model"])
+        self.step = latest_training.training_step
+        self.generation = latest_champion.generation
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -185,6 +205,8 @@ class TrainingController:
                 self.store.update_run(phase="self_play", generation=self.generation)
                 self._emit("phase", phase="self_play", generation=self.generation)
                 examples, games = self._self_play(self.config.self_play_games)
+                if not examples:
+                    break
                 self.replay.extend(examples)
                 for game in games:
                     self.store.add_game(game)
@@ -453,4 +475,3 @@ class TrainingController:
             self.callback(event)
         except Exception:
             pass
-

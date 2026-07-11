@@ -82,6 +82,15 @@ class TrainingManager:
     def action(self, run_id: str, action: str) -> RunRecord:
         controller = self.controllers.get(run_id)
         store = self.repository.open(run_id)
+        if controller is None and action == "resume":
+            run = store.get_run()
+            if run is None:
+                raise KeyError(run_id)
+            controller = TrainingController(store, run.config, self.broker.publish)
+            with self._lock:
+                self.controllers[run_id] = controller
+            controller.start()
+            return store.get_run() or run
         if controller is None:
             raise KeyError(run_id)
         if action == "pause":
@@ -274,4 +283,3 @@ class ArenaService:
                 for item in result.snapshots
             ],
         }
-

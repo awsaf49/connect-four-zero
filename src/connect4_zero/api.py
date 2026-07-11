@@ -78,7 +78,10 @@ def create_run(request: CreateRunRequest) -> dict[str, Any]:
         raise HTTPException(409, "A training run is already active")
     if not request.config.allow_cpu and not torch.backends.mps.is_available():
         raise HTTPException(503, "MPS is required for production training")
-    return training.create(request.config, request.name).model_dump(mode="json")
+    config = request.config
+    if config.wandb_mode == "online" and not _wandb_available():
+        config = config.model_copy(update={"wandb_mode": "offline"})
+    return training.create(config, request.name).model_dump(mode="json")
 
 
 @app.get("/api/runs/{run_id}")
@@ -182,4 +185,3 @@ if WEB_DIST.exists():
     def frontend(path: str) -> FileResponse:
         candidate = WEB_DIST / path
         return FileResponse(candidate if candidate.is_file() else WEB_DIST / "index.html")
-
