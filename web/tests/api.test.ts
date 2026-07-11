@@ -4,9 +4,15 @@ import { DEMO_EVOLUTION, DEMO_REPLAYS, DEMO_RUNS } from "../src/lib/api";
 describe("demo API contract", () => {
   it("ships usable fallback runs and evolution history", () => {
     expect(DEMO_RUNS.length).toBeGreaterThanOrEqual(1);
-    expect(DEMO_RUNS[0]).toMatchObject({ id: "demo-bundled", status: "complete", device: "Apple M5 Max / MPS" });
+    expect(DEMO_RUNS[0]).toMatchObject({
+      id: "demo-bundled",
+      status: "complete",
+      generation: 19,
+      games: 1905,
+      device: "Apple M5 Max / MPS",
+    });
     expect(DEMO_EVOLUTION.length).toBeGreaterThanOrEqual(5);
-    expect(DEMO_EVOLUTION.at(-1)?.games).toBe(11162);
+    expect(DEMO_EVOLUTION.at(-1)).toMatchObject({ generation: 19, games: 57264 });
   });
 
   it("keeps replay payloads scrubbable and tied to a run", () => {

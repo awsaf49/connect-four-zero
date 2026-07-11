@@ -13,33 +13,33 @@ const REQUEST_TIMEOUT_MS = 8_000;
 export const DEMO_RUNS: RunSummary[] = [
   {
     id: "demo-bundled",
-    name: "Five-minute self-trained champion",
+    name: "One-hour self-trained champion",
     status: "complete",
-    generation: 1,
-    games: 516,
+    generation: 19,
+    games: 1905,
     winRate: 1,
     device: "Apple M5 Max / MPS",
     updatedAt: "2026-07-11T10:08:10.000Z",
-    checkpoint: "demo-champion",
+    checkpoint: "g019-s005600-final",
   },
 ];
 
 const REAL_METRICS = [
-  [0, 1.951, 0.856, 0.25, 1382],
-  [0, 1.935, 0.777, 0.5, 2856],
-  [0, 1.903, 0.671, 0.5, 4586],
-  [0, 1.85, 0.577, 0.25, 6397],
-  [1, 1.814, 0.551, 1, 8134],
-  [1, 1.783, 0.513, 0.5, 9762],
-  [1, 1.775, 0.497, 0.5, 11162],
+  [1, 1.718, 0.3, 1, 1571], [2, 1.505, 0.249, 1, 3035], [3, 1.448, 0.245, 1, 4785],
+  [4, 1.335, 0.282, 0.75, 8419], [5, 1.202, 0.293, 1, 14049], [6, 1.198, 0.308, 1, 16035],
+  [7, 1.173, 0.32, 1, 20498], [8, 1.152, 0.304, 0.75, 24485], [9, 1.15, 0.322, 0.75, 26682],
+  [10, 1.15, 0.326, 1, 28825], [11, 1.107, 0.294, 0.75, 31071], [12, 1.084, 0.288, 1, 33372],
+  [13, 1.076, 0.291, 0.75, 35641], [14, 1.063, 0.291, 1, 39864], [15, 1.046, 0.301, 0.75, 43929],
+  [16, 1.055, 0.305, 1, 48292], [17, 1.066, 0.335, 0.75, 52825], [18, 1.065, 0.345, 0.75, 55005],
+  [19, 1.069, 0.35, 1, 57264],
 ] as const;
 
-export const DEMO_EVOLUTION: EvolutionPoint[] = REAL_METRICS.map((item, index) => ({
-  generation: index,
+export const DEMO_EVOLUTION: EvolutionPoint[] = REAL_METRICS.map((item) => ({
+  generation: item[0],
   policyLoss: item[1],
   valueLoss: item[2],
   arenaWinRate: item[3],
-  elo: 1000 + item[0] * 80 + index * 8,
+  elo: 1000 + item[0] * 24,
   games: item[4],
 }));
 
@@ -47,14 +47,14 @@ export const DEMO_REPLAYS: ReplayPayload[] = [
   {
     id: "demo-game-1",
     runId: "demo-bundled",
-    label: "generation 1 self-play",
-    result: "win",
-    winner: 1,
-    moves: [3, 2, 3, 4, 2, 4, 1, 5, 1, 3, 0],
-    simulations: 128,
-    createdAt: "2026-07-11T10:08:00.000Z",
-    opening: "Central pressure",
-    notes: "A real representative line from the bundled zero-knowledge run.",
+    label: "generation 19 arena",
+    result: "loss",
+    winner: 2,
+    moves: [3, 3, 3, 3, 3, 5, 5, 5, 1, 2, 5, 2, 1, 2, 2, 2, 3, 4, 4, 5, 4, 5, 2, 6, 6, 6, 6, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1, 1],
+    simulations: 256,
+    createdAt: "2026-07-11T11:12:00.000Z",
+    opening: "Center opening",
+    notes: "Champion 18 versus the generation 19 candidate in the final paired arena.",
   },
 ];
 
