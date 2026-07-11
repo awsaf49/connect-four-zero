@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 import uvicorn
 
+from .benchmark import benchmark_model
 from .network import PolicyValueNet
 from .network import PolicyValueEvaluator
 from .evaluation import play_vs_random, solver_move_accuracy
@@ -43,6 +44,12 @@ def _parser() -> argparse.ArgumentParser:
     audit.add_argument("--positions", type=int, default=40)
     audit.add_argument("--simulations", type=int, default=64)
     audit.add_argument("--seed", type=int, default=41)
+    benchmark = commands.add_parser("benchmark-mps", help="benchmark faithful network variants on Apple Metal")
+    benchmark.add_argument("--batches", type=int, nargs="+", default=[512, 1024, 2048])
+    benchmark.add_argument("--models", nargs="+", default=["64x6", "64x8", "96x6"])
+    benchmark.add_argument("--precisions", nargs="+", choices=("float32", "float16"), default=["float32", "float16"])
+    benchmark.add_argument("--steps", type=int, default=8)
+    benchmark.add_argument("--allow-cpu", action="store_true")
     return parser
 
 
@@ -79,6 +86,37 @@ def main() -> None:
             seed=args.seed,
         )
         print(json.dumps({"checkpoint": str(args.checkpoint), "metadata": metadata, **result.as_dict()}, indent=2))
+        return
+    if args.command == "benchmark-mps":
+        results = []
+        for model_spec in args.models:
+            try:
+                channels, blocks = (int(value) for value in model_spec.lower().split("x", maxsplit=1))
+            except ValueError as exc:
+                raise SystemExit(f"invalid model {model_spec!r}; expected CHANNELSxBLOCKS") from exc
+            for batch_size in args.batches:
+                for precision in args.precisions:
+                    try:
+                        result = benchmark_model(
+                            channels=channels,
+                            blocks=blocks,
+                            batch_size=batch_size,
+                            precision=precision,
+                            measured_steps=args.steps,
+                            allow_cpu=args.allow_cpu,
+                        )
+                        results.append(result.as_dict())
+                    except RuntimeError as exc:
+                        results.append(
+                            {
+                                "channels": channels,
+                                "blocks": blocks,
+                                "batch_size": batch_size,
+                                "precision": precision,
+                                "error": str(exc),
+                            }
+                        )
+        print(json.dumps({"device": str(torch.device("mps") if torch.backends.mps.is_available() else "cpu"), "results": results}, indent=2))
         return
 
     run_id = f"run-{uuid.uuid4().hex[:12]}"

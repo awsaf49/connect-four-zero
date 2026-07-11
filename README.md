@@ -2,6 +2,8 @@
 
 A local, inspectable AlphaGo Zero system for standard 7x6 Connect Four. It trains from random weights with self-play, PUCT search, and a single residual policy/value network accelerated by Apple Metal.
 
+Profile faithful model, batch-size, and mixed-precision variants with `connect4-zero benchmark-mps`. The benchmark measures both optimization and inference throughput so faster training does not hide slower self-play.
+
 ## Setup
 
 ```bash

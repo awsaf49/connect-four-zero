@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from connect4_zero.game import ConnectFour
+from connect4_zero.benchmark import benchmark_model
 from connect4_zero.network import PolicyValueEvaluator, PolicyValueNet, resolve_device
 
 
@@ -38,6 +39,21 @@ def test_cpu_requires_explicit_opt_in() -> None:
         PolicyValueEvaluator(PolicyValueNet(), device="cpu")
 
 
+def test_benchmark_reports_finite_cpu_result() -> None:
+    result = benchmark_model(
+        channels=8,
+        blocks=1,
+        batch_size=4,
+        precision="float32",
+        warmup_steps=1,
+        measured_steps=1,
+        allow_cpu=True,
+    )
+    assert result.finite
+    assert result.training_positions_per_second > 0
+    assert result.inference_positions_per_second > 0
+
+
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="requires Apple MPS")
 def test_mps_forward_backward() -> None:
     device = resolve_device()
@@ -46,4 +62,3 @@ def test_mps_forward_backward() -> None:
     (policy.mean() + value.mean()).backward()
     torch.mps.synchronize()
     assert device.type == "mps"
-
