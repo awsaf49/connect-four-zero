@@ -36,7 +36,7 @@ export interface PositionAnalysis {
 export interface RunSummary {
   id: string;
   name: string;
-  status: "running" | "complete" | "queued" | "paused";
+  status: "running" | "complete" | "queued" | "paused" | "stopped" | "interrupted" | "failed";
   generation: number;
   games: number;
   winRate: number;

@@ -1663,6 +1663,12 @@ button:disabled {
   color: var(--blue);
 }
 
+.run-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .generation-table {
   min-width: 0;
 }

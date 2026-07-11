@@ -64,6 +64,7 @@ interface BackendRun {
   status: "created" | "running" | "paused" | "stopping" | "completed" | "stopped" | "interrupted" | "failed";
   updated_at: string;
   generation: number;
+  game_count?: number;
   config: { simulations: number };
 }
 
@@ -168,7 +169,6 @@ function valueNumber(values: BackendMetric["values"], key: string, fallback = 0)
 function runStatus(status: BackendRun["status"]): RunSummary["status"] {
   if (status === "completed") return "complete";
   if (status === "created" || status === "stopping") return "queued";
-  if (status === "failed" || status === "stopped" || status === "interrupted") return "paused";
   return status;
 }
 
@@ -226,7 +226,7 @@ export const apiClient = {
         name: run.name,
         status: runStatus(run.status),
         generation: run.generation,
-        games: run.id === "demo-bundled" ? 516 : games?.length ?? 0,
+        games: run.game_count ?? (run.id === "demo-bundled" ? 516 : games?.length ?? 0),
         winRate: valueNumber(latest, "evaluation/score"),
         device: "Apple M5 Max / MPS",
         updatedAt: run.updated_at,

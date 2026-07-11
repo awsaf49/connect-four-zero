@@ -17,7 +17,9 @@ async def test_system_and_empty_run_list() -> None:
         response = await client.get("/api/system")
         assert response.status_code == 200
         assert response.json()["model_parameters"] > 400_000
-        assert (await client.get("/api/runs")).status_code == 200
+        runs = await client.get("/api/runs")
+        assert runs.status_code == 200
+        assert all("game_count" in run for run in runs.json())
 
 
 @pytest.mark.asyncio

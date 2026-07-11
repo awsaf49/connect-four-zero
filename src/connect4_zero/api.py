@@ -80,7 +80,12 @@ def system_status() -> SystemStatus:
 
 @app.get("/api/runs")
 def list_runs() -> list[dict[str, Any]]:
-    return [run.model_dump(mode="json") for run in repository.list_runs()]
+    results: list[dict[str, Any]] = []
+    for run in repository.list_runs():
+        payload = run.model_dump(mode="json")
+        payload["game_count"] = repository.open(run.id).count_games()
+        results.append(payload)
+    return results
 
 
 @app.post("/api/runs", status_code=201)
@@ -98,10 +103,13 @@ def create_run(request: CreateRunRequest) -> dict[str, Any]:
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict[str, Any]:
-    run = repository.open(run_id).get_run()
+    store = repository.open(run_id)
+    run = store.get_run()
     if run is None:
         raise HTTPException(404, "Run not found")
-    return run.model_dump(mode="json")
+    payload = run.model_dump(mode="json")
+    payload["game_count"] = store.count_games()
+    return payload
 
 
 @app.post("/api/runs/{run_id}/action")

@@ -26,6 +26,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Sparkles,
+  Square,
   Target,
   Trophy,
   Volume2,
@@ -295,6 +296,9 @@ function RunStatus({ status }: { status: RunSummary["status"] }) {
     complete: "Complete",
     queued: "Queued",
     paused: "Paused",
+    stopped: "Stopped",
+    interrupted: "Interrupted",
+    failed: "Failed",
   };
   return <span className={`run-status status-${status}`}><span className="status-dot" />{labels[status]}</span>;
 }
@@ -576,6 +580,17 @@ function App() {
     setLaunchingRun(false);
   }
 
+  async function controlRun(action: "pause" | "resume" | "stop") {
+    if (source !== "api" || !selectedRun) return;
+    setLaunchingRun(true);
+    const updated = await apiClient.runAction(selectedRun.id, action);
+    if (updated) {
+      const runResult = await apiClient.getRuns();
+      setRuns(runResult.data);
+    }
+    setLaunchingRun(false);
+  }
+
   const playInsight = coachInsight(playAnalysis, playState.currentPlayer);
   const playStatus = playState.winner === 1
     ? "You won the position"
@@ -728,7 +743,7 @@ function App() {
         <div className="stat-grid"><StatCard icon={Trophy} label="Arena win rate" value={formatPercent(currentEvolution.arenaWinRate)} detail="candidate vs champion" tone="green" /><StatCard icon={GitBranch} label="Generation" value={`#${currentRun.generation}`} detail={`${formatNumber(currentEvolution.games)} replay positions`} tone="blue" /><StatCard icon={BarChart3} label="Elo estimate" value={Math.round(currentEvolution.elo).toLocaleString()} detail="checkpoint-relative estimate" tone="orange" /><StatCard icon={Cpu} label="Compute" value={currentRun.device.replace("Apple ", "")} detail="MPS / local" tone="slate" /></div>
         <div className="evolution-layout">
           <section className="surface chart-panel evolution-chart-panel"><div className="panel-heading"><div><p className="eyebrow">Run trajectory</p><h2>Strength is moving in the right direction</h2></div><div className="chart-legend"><span><i className="legend-line legend-win" />Arena win</span><span><i className="legend-line legend-policy" />Policy loss</span></div></div><div className="chart-wrap chart-evolution"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 16, right: 18, bottom: 4, left: -8 }}><CartesianGrid stroke="#edf0f4" vertical={false} /><XAxis dataKey="generation" tick={{ fill: "#98a2b3", fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={(value) => `G${value}`} /><YAxis yAxisId="left" tick={{ fill: "#98a2b3", fontSize: 11 }} tickLine={false} axisLine={false} domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} /><YAxis yAxisId="right" orientation="right" tick={{ fill: "#98a2b3", fontSize: 11 }} tickLine={false} axisLine={false} domain={[0.7, 2]} /><Tooltip contentStyle={{ border: "1px solid #e4e7ec", borderRadius: 8, fontSize: 12 }} formatter={(value, name) => [name === "Arena win" ? `${Math.round(Number(value) * 100)}%` : Number(value).toFixed(2), name]} labelFormatter={(label) => `Generation ${label}`} /><Line dataKey="winRate" name="Arena win" stroke="#2c9b73" strokeWidth={2.5} dot={{ r: 2.5, fill: "#2c9b73", strokeWidth: 0 }} yAxisId="left" /><Line dataKey="policyLoss" name="Policy loss" stroke="#f07c64" strokeWidth={2} dot={false} yAxisId="right" /></LineChart></ResponsiveContainer></div></section>
-          <section className="surface run-profile"><div className="panel-heading"><div><p className="eyebrow">Selected run</p><h2>{currentRun.name}</h2></div><RunStatus status={currentRun.status} /></div><div className="profile-list"><div><span>Checkpoint</span><strong>{currentRun.checkpoint}</strong></div><div><span>Generation</span><strong>{currentRun.generation}</strong></div><div><span>Self-play</span><strong>{formatNumber(currentRun.games)} games</strong></div><div><span>Last update</span><strong>{formatDate(currentRun.updatedAt)}</strong></div></div><div className="profile-callout"><Sparkles size={16} /><span>The current run has cleared its strongest arena checkpoint so far.</span></div><button className="full-button" onClick={() => navigate("lab")} type="button">Inspect checkpoint <ArrowUpRight size={15} /></button></section>
+          <section className="surface run-profile"><div className="panel-heading"><div><p className="eyebrow">Selected run</p><h2>{currentRun.name}</h2></div><RunStatus status={currentRun.status} /></div><div className="profile-list"><div><span>Checkpoint</span><strong>{currentRun.checkpoint}</strong></div><div><span>Generation</span><strong>{currentRun.generation}</strong></div><div><span>Self-play</span><strong>{formatNumber(currentRun.games)} games</strong></div><div><span>Last update</span><strong>{formatDate(currentRun.updatedAt)}</strong></div></div><div className="profile-callout"><Sparkles size={16} /><span>The current run has cleared its strongest arena checkpoint so far.</span></div><div className="run-actions">{currentRun.status === "running" ? <button className="quiet-button" disabled={launchingRun} onClick={() => void controlRun("pause")} type="button"><Pause size={15} />Pause</button> : null}{currentRun.status === "paused" || currentRun.status === "interrupted" ? <button className="quiet-button" disabled={launchingRun} onClick={() => void controlRun("resume")} type="button"><Play size={15} />Resume</button> : null}{currentRun.status === "running" || currentRun.status === "paused" || currentRun.status === "interrupted" ? <button className="quiet-button" disabled={launchingRun} onClick={() => void controlRun("stop")} type="button"><Square size={14} />Stop</button> : null}</div><button className="full-button" onClick={() => navigate("lab")} type="button">Inspect checkpoint <ArrowUpRight size={15} /></button></section>
         </div>
         <section className="surface generation-table"><div className="panel-heading"><div><p className="eyebrow">Generation ledger</p><h2>Recent checkpoints</h2></div><span className="quiet-badge"><Clock3 size={14} /> Updated {formatDate(currentRun.updatedAt)}</span></div><div className="table-scroll"><table><thead><tr><th>Generation</th><th>Policy loss</th><th>Value loss</th><th>Arena</th><th>Elo</th><th>Games</th></tr></thead><tbody>{evolution.slice(-6).reverse().map((point) => <tr key={point.generation}><td><strong>G{String(point.generation).padStart(2, "0")}</strong>{point.generation === currentEvolution.generation ? <span className="current-tag">current</span> : null}</td><td>{point.policyLoss.toFixed(2)}</td><td>{point.valueLoss.toFixed(2)}</td><td><span className="table-positive">{formatPercent(point.arenaWinRate)}</span></td><td>{Math.round(point.elo).toLocaleString()}</td><td>{formatNumber(point.games)}</td></tr>)}</tbody></table></div></section>
       </>
@@ -777,7 +792,7 @@ function App() {
         <div className="sidebar-section-label">Workspace</div>
         <nav className="sidebar-nav" aria-label="Primary navigation">{NAV_ITEMS.map(({ id, label, hint, icon: Icon }) => <button className={`nav-item ${view === id ? "is-active" : ""}`} key={id} onClick={() => navigate(id)} type="button"><span className="nav-icon"><Icon size={17} strokeWidth={view === id ? 2.2 : 1.8} /></span><span className="nav-copy"><strong>{label}</strong><small>{hint}</small></span>{view === id ? <span className="nav-active-mark" /> : null}</button>)}</nav>
         <div className="sidebar-spacer" />
-        <div className="sidebar-footer"><div className="engine-card"><div className="engine-card-heading"><span className="engine-orb"><BrainCircuit size={15} /></span><div><strong>Zero engine</strong><span>{source === "api" ? "Connected to API" : "Running in demo mode"}</span></div></div><div className="engine-meter"><span style={{ width: source === "api" ? "82%" : "64%" }} /></div><div className="engine-card-foot"><span>MPS ready</span><span>{source === "api" ? "online" : "local"}</span></div></div><div className="sidebar-meta"><span>v0.1 research build</span><span className="keyboard-hint"><Command size={11} /> K</span></div></div>
+        <div className="sidebar-footer"><div className="engine-card"><div className="engine-card-heading"><span className="engine-orb"><BrainCircuit size={15} /></span><div><strong>Zero engine</strong><span>{source === "api" ? "Connected to API" : "Running in demo mode"}</span></div></div><div className="engine-meter"><span style={{ width: source === "api" ? "82%" : "64%" }} /></div><div className="engine-card-foot"><span>MPS ready</span><span>local</span></div></div><div className="sidebar-meta"><span>v0.1 research build</span><span className="keyboard-hint"><Command size={11} /> K</span></div></div>
       </aside>
       <main className="app-main">
         <header className="topbar"><div className="mobile-brand"><span className="brand-mark small-mark"><span /><span /><span /><span /></span><strong>{VIEW_META[view].eyebrow}</strong></div><div className="topbar-context"><span>Connect Four Zero</span><ChevronRight size={14} /><strong>{VIEW_META[view].title}</strong></div><div className="topbar-actions"><SourceBadge source={source} /><button className="icon-button" onClick={() => setMuted((value) => !value)} title={muted ? "Unmute sounds" : "Mute sounds"} type="button" aria-label={muted ? "Unmute sounds" : "Mute sounds"}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}</button><button className="avatar-button" type="button" aria-label="Open account menu">A</button></div></header>
