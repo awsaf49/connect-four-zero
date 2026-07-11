@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { analysisMetric, formatQ, ROWS, COLS } from "../lib/game";
 import { discDropDuration } from "../lib/sound";
@@ -45,8 +45,27 @@ export function ConnectFourBoard({
   label = "Connect Four board",
 }: ConnectFourBoardProps) {
   const [hoveredColumn, setHoveredColumn] = useState<number | null>(null);
+  const moveKey = lastMove ? `${lastMove.row}-${lastMove.column}-${lastMove.player}` : null;
+  const previousMoveKey = useRef(moveKey);
+  const [droppingMoveKey, setDroppingMoveKey] = useState<string | null>(null);
   const winningSet = new Set(winningCells.map(([row, column]) => `${row}-${column}`));
   const currentCanPlay = !disabled && Boolean(onColumnSelect);
+
+  useEffect(() => {
+    if (!moveKey) {
+      previousMoveKey.current = null;
+      setDroppingMoveKey(null);
+      return;
+    }
+    if (moveKey === previousMoveKey.current) return;
+    previousMoveKey.current = moveKey;
+    setDroppingMoveKey(moveKey);
+    const timer = window.setTimeout(
+      () => setDroppingMoveKey((current) => current === moveKey ? null : current),
+      discDropDuration(lastMove?.row ?? 0) + 80,
+    );
+    return () => window.clearTimeout(timer);
+  }, [lastMove?.row, moveKey]);
 
   return (
     <div className={`board-frame ${compact ? "board-frame-compact" : ""}`}>
@@ -78,6 +97,7 @@ export function ConnectFourBoard({
         {board.map((row, rowIndex) =>
           row.map((cell, columnIndex) => {
             const isLastMove = lastMove?.row === rowIndex && lastMove.column === columnIndex;
+            const isDropping = isLastMove && moveKey === droppingMoveKey;
             const isWinningCell = winningSet.has(`${rowIndex}-${columnIndex}`);
             return (
               <div
@@ -87,8 +107,8 @@ export function ConnectFourBoard({
                 aria-label={`${cell === 0 ? "Empty" : cell === currentPlayer ? "Your piece" : "Engine piece"}, row ${ROWS - rowIndex}, column ${columnIndex + 1}`}
               >
                 <span
-                  className={`piece piece-${cell} ${isLastMove && cell ? "piece-dropping" : ""}`}
-                  style={isLastMove && cell ? {
+                  className={`piece piece-${cell} ${isDropping && cell ? "piece-dropping" : ""}`}
+                  style={isDropping && cell ? {
                     "--drop-rows": rowIndex + 1,
                     "--drop-duration": `${discDropDuration(rowIndex)}ms`,
                   } as CSSProperties : undefined}

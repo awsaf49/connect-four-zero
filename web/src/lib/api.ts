@@ -233,6 +233,7 @@ export const apiClient = {
         checkpoint,
       } satisfies RunSummary;
     }));
+    summaries.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
     return { data: summaries, source: "api" };
   },
 
