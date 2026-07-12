@@ -6,11 +6,19 @@
 
 No opening book. No human games. No handcrafted strategy. No perfect solver hiding inside training.
 
+<br>
+
+![Self-play](https://img.shields.io/badge/SELF--PLAY-ZERO_HUMAN_DATA-E54B4B?style=for-the-badge)
+![PyTorch MPS](https://img.shields.io/badge/PYTORCH-MPS_ACCELERATED-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![Apple Silicon](https://img.shields.io/badge/APPLE_SILICON-M5_MAX-171717?style=for-the-badge&logo=apple&logoColor=white)
+![React](https://img.shields.io/badge/REACT-LIVE_LAB-2188B6?style=for-the-badge&logo=react&logoColor=white)
+
 </div>
 
 ![A live game against the generation-19 checkpoint, with MCTS policy and value exposed](docs/connect-four-zero.jpg)
 
-> **In short:** this repository contains the complete learning loop, a one-hour self-trained checkpoint, a playable neural opponent, a live MCTS microscope, generation history, exact move auditing, and deterministic replay export.
+> [!NOTE]
+> **This is the whole experiment, not a UI mockup:** a one-hour self-trained checkpoint, playable neural opponent, live MCTS microscope, generation history, exact move auditing, and deterministic replay export.
 
 ## What Is This?
 
@@ -20,7 +28,7 @@ The model begins with random weights. It generates every lesson by playing again
 
 The point is not to claim that Connect Four has been solved. It is to make the machinery of self-play tangible. You can watch policy become less diffuse, see MCTS disagree with the raw network, discover where the value head is confidently wrong, and then punish those mistakes in a real game.
 
-## Play In About A Minute
+## 🎮 Play In About A Minute
 
 ```bash
 conda env create -f environment.yml
@@ -44,9 +52,10 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000). You land directly in **Play
    - **Champion:** final checkpoint, 800 simulations
 5. Connect four horizontally, vertically, or diagonally. The winning discs lift and a line marks the connection.
 
-The tree is advice, not an oracle. Ignoring its preferred move is allowed. In fact, finding a line it misunderstood is half the fun.
+> [!TIP]
+> The tree is advice, not an oracle. Ignore its preferred move. Finding a line the model misunderstood is half the fun.
 
-## The Fun Part
+## ✨ The Fun Part
 
 - **Play the timeline.** Fight an early checkpoint, then jump to generation 19 and feel what changed.
 - **Watch search change its mind.** In Lab, scrub from the first simulation to the settled visit distribution.
@@ -55,7 +64,7 @@ The tree is advice, not an oracle. Ignoring its preferred move is allowed. In fa
 - **Replay the embarrassment.** Terminal games preserve the connected-four line, solver grade, and move-by-move timeline.
 - **Start over from nothing.** Launch a clean 5, 15, 30, or 60-minute experiment and watch a different lineage emerge.
 
-## Four Views Into The Same Mind
+## 🔬 Four Views Into The Same Mind
 
 | Search Lab | Evolution |
 | --- | --- |
@@ -67,7 +76,7 @@ The tree is advice, not an oracle. Ignoring its preferred move is allowed. In fa
 | ![A saved human loss with four winning discs and the connected line highlighted](docs/replay.jpg) | ![A real evaluation game exported by the replay renderer](docs/self-play-replay.gif) |
 | **Review decisive moments.** Human, self-play, and arena games share one scrubber. | **Take it with you.** Every replay can become deterministic JSON and MP4. |
 
-## What Happened In One Hour?
+## ⏱️ What Happened In One Hour?
 
 The bundled checkpoint came from one real 60-minute run on an Apple M5 Max.
 
@@ -82,7 +91,8 @@ The bundled checkpoint came from one real 60-minute run on an Apple M5 Max.
 | Exact tactical probes at 32 simulations | 19 / 24 |
 | Exact tactical probes at 800 simulations | 21 / 24 |
 
-That sounds impressive until a human sits down. The first “Champion” lost to casual play. That failure turned out to be one of the most useful results in the project.
+> [!IMPORTANT]
+> **Then a human beat “Champion.”** The polished metrics did not guarantee tactical reliability. That visible failure became one of the most useful results in the project.
 
 ### Things The Experiment Made Obvious
 
@@ -96,27 +106,19 @@ That sounds impressive until a human sits down. The first “Champion” lost to
 
 **The visible failure is better than a hidden metric.** Human games are now first-class replays. When the model loses, the useful question is no longer “why is the win rate low?” but “which search trace made the losing move look attractive?”
 
-## How The Learning Loop Works
+## ♻️ How The Learning Loop Works
 
-```mermaid
-flowchart LR
-    A[Random network] --> B[64 concurrent self-play games]
-    B --> C[State, visit policy, final outcome]
-    C --> D[Replay window]
-    D --> E[Policy and value training]
-    E --> F[Candidate checkpoint]
-    F --> G{Paired arena}
-    G -->|score above 55%| H[New champion]
-    G -->|otherwise| I[Rejected snapshot]
-    H --> B
-    I --> B
-```
+![Connect Four Zero self-play, optimization, champion gating, persistence, and solver isolation architecture](docs/training-loop.png)
+
+Read the solid arrows clockwise. The champion generates its own experience, the MPS trainer turns that experience into a candidate, and the paired arena decides whether the candidate may replace its parent. Promotion closes the loop; rejection preserves the failed branch and leaves the champion untouched.
+
+The dashed block is deliberately outside learning. It can display, replay, grade, and export what happened, but it cannot modify a target or choose a training move.
 
 For each position, PUCT combines the network prior, accumulated Q-value, and an exploration bonus. The target policy is not the network’s first guess; it is the distribution of MCTS visits after search. The value target is simply the eventual outcome from the current player’s perspective.
 
 Training uses no rollout policy and never resigns self-play games.
 
-## What Is Under The Hood?
+## 🧠 What Is Under The Hood?
 
 ### Neural network
 
@@ -147,7 +149,7 @@ Training uses no rollout policy and never resigns self-play games.
 - Exact bitboard/negamax auditor isolated from training imports
 - Deterministic replay JSON and ffmpeg MP4 export
 
-## Train Your Own Lineage
+## 🚀 Train Your Own Lineage
 
 The preset one-hour experiment is:
 
@@ -157,7 +159,8 @@ make train-60
 
 Or launch it from **Evolution → Train from zero**. New runs cannot consume the bundled champion, its games, or its replay buffer.
 
-Production training requires PyTorch MPS. CPU execution is available only for tests and explicit debugging.
+> [!WARNING]
+> Production training requires PyTorch MPS. CPU execution is available only for tests and explicit debugging.
 
 Profile the M5 yourself:
 
