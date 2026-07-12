@@ -1,4 +1,9 @@
 .DS_Store
+
+# Local research pages are unrelated to the Connect Four application
+/index.html
+/muzero.html
+
 .env
 .env.*
 !.env.example
